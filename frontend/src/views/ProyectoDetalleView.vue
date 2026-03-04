@@ -1,0 +1,574 @@
+<script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
+import { useRoute } from 'vue-router'
+import { getProyecto } from '@/services/proyectos'
+import { getTareas } from '@/services/tareas'
+import { api } from '@/services/api'
+import { useAuth } from '@/composables/useAuth'
+import { useToast } from '@/composables/useToast'
+import { useConfirmDelete } from '@/composables/useConfirmDelete'
+import { estadoVencimiento, claseVencimiento } from '@/utils/vencimiento'
+import PieChart from '@/components/PieChart.vue'
+import BarChart from '@/components/BarChart.vue'
+import { exportarProyectoDetalle } from '@/utils/exportProyectoDetalle'
+import IconDownload from '@/components/icons/IconDownload.vue'
+import IconEdit from '@/components/icons/IconEdit.vue'
+import IconTrash from '@/components/icons/IconTrash.vue'
+
+const route = useRoute()
+const toast = useToast()
+const { user, isAdmin, isVisualizador } = useAuth()
+const { confirmDelete } = useConfirmDelete()
+const proyecto = ref<Record<string, unknown> | null>(null)
+const tareas = ref<Record<string, unknown>[]>([])
+const etapas = ref<Record<string, unknown>[]>([])
+const indicadores = ref<Record<string, unknown>[]>([])
+const adjuntos = ref<Record<string, unknown>[]>([])
+const archivoProyecto = ref<HTMLInputElement | null>(null)
+const subiendoAdjunto = ref(false)
+const adjuntoEditando = ref<number | null>(null)
+const nombreAdjuntoEditando = ref('')
+
+function puedeModificarAdjunto(a: Record<string, unknown>): boolean {
+  if (!user.value) return false
+  if (isAdmin.value) return true
+  return (a.subido_por as number) === user.value.id
+}
+
+const proyectoId = computed(() => Number(route.params.id))
+
+const load = async () => {
+  const id = proyectoId.value
+  proyecto.value = (await getProyecto(id)).data
+  tareas.value = (await getTareas({ proyecto: id })).data
+  etapas.value = (await api.get('etapas/', { params: { proyecto: id } })).data
+  const [indRes, adjRes] = await Promise.all([
+    api.get('indicadores/', { params: { proyecto: id } }),
+    api.get('adjuntos-proyecto/', { params: { proyecto: id } }),
+  ])
+  indicadores.value = Array.isArray(indRes.data) ? indRes.data : (indRes.data?.results || [])
+  adjuntos.value = Array.isArray(adjRes.data) ? adjRes.data : (adjRes.data?.results || [])
+}
+
+async function subirAdjuntoProyecto() {
+  const input = archivoProyecto.value
+  if (!proyecto.value || !input?.files?.length) return
+  const file = input.files[0]
+  if (!file) return
+  subiendoAdjunto.value = true
+  try {
+    const formData = new FormData()
+    formData.append('proyecto', String(proyectoId.value))
+    formData.append('archivo', file)
+    formData.append('nombre_original', file.name)
+    await api.post('adjuntos-proyecto/', formData)
+    const res = await api.get('adjuntos-proyecto/', { params: { proyecto: proyectoId.value } })
+    adjuntos.value = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+    toast.success('Archivo subido correctamente.')
+    input.value = ''
+  } catch {
+    toast.error('Error al subir el archivo.')
+  } finally {
+    subiendoAdjunto.value = false
+  }
+}
+
+function iniciarEdicionAdjunto(a: Record<string, unknown>) {
+  adjuntoEditando.value = a.id as number
+  nombreAdjuntoEditando.value = (a.nombre_original as string) || ''
+}
+
+function cancelarEdicionAdjunto() {
+  adjuntoEditando.value = null
+  nombreAdjuntoEditando.value = ''
+}
+
+async function guardarEdicionAdjunto() {
+  const id = adjuntoEditando.value
+  if (!id || !nombreAdjuntoEditando.value.trim()) return
+  try {
+    await api.patch(`adjuntos-proyecto/${id}/`, { nombre_original: nombreAdjuntoEditando.value.trim() })
+    const res = await api.get('adjuntos-proyecto/', { params: { proyecto: proyectoId.value } })
+    adjuntos.value = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+    adjuntoEditando.value = null
+    nombreAdjuntoEditando.value = ''
+    toast.success('Adjunto actualizado.')
+  } catch {
+    toast.error('Error al actualizar el adjunto.')
+  }
+}
+
+async function eliminarAdjunto(a: Record<string, unknown>) {
+  if (!(await confirmDelete())) return
+  try {
+    await api.delete(`adjuntos-proyecto/${a.id}/`)
+    const res = await api.get('adjuntos-proyecto/', { params: { proyecto: proyectoId.value } })
+    adjuntos.value = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+    toast.success('Adjunto eliminado.')
+  } catch {
+    toast.error('Error al eliminar el adjunto.')
+  }
+}
+
+const tareasParaTabla = computed(() => {
+  const lista = tareas.value
+  const resultado: { tarea: Record<string, unknown>; esSubtarea: boolean; orden: string }[] = []
+  const raices = lista.filter((t: Record<string, unknown>) => !t.tarea_padre)
+  let idx = 1
+  for (const t of raices) {
+    resultado.push({ tarea: t, esSubtarea: false, orden: String(idx) })
+    const hijos = (t.subtareas as Record<string, unknown>[]) || []
+    hijos.forEach((h, j) => {
+      resultado.push({ tarea: h, esSubtarea: true, orden: `${idx}.${j + 1}` })
+    })
+    idx++
+  }
+  const idsIncluidos = new Set(resultado.map((r) => r.tarea.id))
+  for (const t of lista) {
+    if (t.tarea_padre && !idsIncluidos.has(t.id)) {
+      resultado.push({ tarea: t, esSubtarea: true, orden: '—' })
+    }
+  }
+  return resultado
+})
+
+const tareasPorVencimiento = computed(() => {
+  const items = tareasParaTabla.value
+  const vencidas: { tarea: Record<string, unknown>; esSubtarea: boolean; orden: string }[] = []
+  const proximas: { tarea: Record<string, unknown>; esSubtarea: boolean; orden: string }[] = []
+  const dentro: { tarea: Record<string, unknown>; esSubtarea: boolean; orden: string }[] = []
+  for (const item of items) {
+    const est = estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)
+    if (est === 'vencida') vencidas.push(item)
+    else if (est === 'proxima') proximas.push(item)
+    else dentro.push(item)
+  }
+  return { vencidas, proximas, dentro }
+})
+
+const avanceGeneral = computed(() => Number(proyecto.value?.porcentaje_avance) || 0)
+
+const datosBarChart = computed(() => {
+  const items = tareasParaTabla.value
+  return items.map((item) => ({
+    label: (item.tarea.titulo as string) || 'Sin título',
+    value: Number(item.tarea.porcentaje_avance) || 0,
+  }))
+})
+
+const datosSemáforo = computed(() => ({
+  vencidas: tareasPorVencimiento.value.vencidas.length,
+  proximas: tareasPorVencimiento.value.proximas.length,
+  dentro: tareasPorVencimiento.value.dentro.length,
+}))
+
+const totalTareasSemáforo = computed(() => {
+  const d = datosSemáforo.value
+  return d.vencidas + d.proximas + d.dentro
+})
+
+async function exportarExcel() {
+  if (!proyecto.value) return
+  try {
+    await exportarProyectoDetalle(
+      {
+        nombre: proyecto.value.nombre as string,
+        descripcion: proyecto.value.descripcion as string,
+        estado: proyecto.value.estado as string,
+        porcentaje_avance: Number(proyecto.value.porcentaje_avance) || 0,
+      },
+      etapas.value as { id: number; nombre: string; orden?: number }[],
+      indicadores.value as { id: number; descripcion?: string; unidad_medida?: string; frecuencia?: string }[],
+      tareasParaTabla.value.map((item) => ({
+        tarea: item.tarea,
+        esSubtarea: item.esSubtarea,
+        orden: item.orden,
+      })),
+      `proyecto_${String(proyecto.value.nombre || 'proyecto').replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_').trim().slice(0, 80) || proyectoId}`
+    )
+    toast.success('Exportado correctamente.')
+  } catch {
+    toast.error('Error al exportar.')
+  }
+}
+
+onMounted(load)
+</script>
+
+<template>
+  <div class="page" v-if="proyecto">
+    <div class="header-row">
+      <h1>{{ proyecto.nombre }}</h1>
+      <div class="header-actions">
+        <button type="button" class="btn-exportar" @click="exportarExcel">
+          <IconDownload class="btn-icon" />
+          Exportar a Excel
+        </button>
+        <router-link :to="`/proyectos/${proyectoId}/reasignar`" class="btn-reasignar">
+          Reasignar Proyecto
+        </router-link>
+      </div>
+    </div>
+    <p class="desc">{{ proyecto.descripcion }}</p>
+    <p><strong>Estado:</strong> {{ proyecto.estado }} | <strong>Avance general:</strong> {{ avanceGeneral.toFixed(2) }}%</p>
+
+    <!-- Gráficos de resumen -->
+    <section class="section graficos-section">
+      <h2>Resumen visual</h2>
+      <div class="graficos-grid">
+        <div class="grafico-card">
+          <h3 class="grafico-titulo">Avance general</h3>
+          <PieChart :value="avanceGeneral" label="Avance" :size="140" />
+        </div>
+        <div class="grafico-card">
+          <h3 class="grafico-titulo">Avance por tarea</h3>
+          <BarChart v-if="datosBarChart.length" :items="datosBarChart" :max-items="10" />
+          <p v-else class="hint">Sin tareas para mostrar</p>
+        </div>
+        <div class="grafico-card grafico-semáforo">
+          <h3 class="grafico-titulo">Tareas por vencimiento</h3>
+          <div v-if="totalTareasSemáforo" class="semáforo-bars">
+            <div class="semáforo-item">
+              <span class="semáforo-label">Vencida</span>
+              <div class="semáforo-bar-wrap">
+                <div class="semáforo-bar vencida" :style="{ width: (datosSemáforo.vencidas / totalTareasSemáforo * 100) + '%' }"></div>
+              </div>
+              <span class="semáforo-val">{{ datosSemáforo.vencidas }}</span>
+            </div>
+            <div class="semáforo-item">
+              <span class="semáforo-label">Próxima a vencer</span>
+              <div class="semáforo-bar-wrap">
+                <div class="semáforo-bar proxima" :style="{ width: (datosSemáforo.proximas / totalTareasSemáforo * 100) + '%' }"></div>
+              </div>
+              <span class="semáforo-val">{{ datosSemáforo.proximas }}</span>
+            </div>
+            <div class="semáforo-item">
+              <span class="semáforo-label">Dentro del plazo</span>
+              <div class="semáforo-bar-wrap">
+                <div class="semáforo-bar dentro" :style="{ width: (datosSemáforo.dentro / totalTareasSemáforo * 100) + '%' }"></div>
+              </div>
+              <span class="semáforo-val">{{ datosSemáforo.dentro }}</span>
+            </div>
+          </div>
+          <p v-else class="hint">Sin tareas</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <ul class="list">
+        <li v-for="e in etapas" :key="(e.id as number)">{{ e.nombre }} (orden: {{ e.orden }})</li>
+      </ul>
+    </section>
+
+    <section v-if="indicadores.length" class="section">
+      <ul class="list indicadores-list">
+        <li v-for="i in indicadores" :key="(i.id as number)" class="indicador-item">
+          <span>{{ i.descripcion }}</span>
+          <span class="meta">{{ i.unidad_medida }} · {{ i.frecuencia }}</span>
+        </li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Adjuntos</h2>
+      <div v-if="adjuntos.length" class="adjuntos-lista">
+        <div v-for="a in adjuntos" :key="(a.id as number)" class="adjunto-item">
+          <template v-if="adjuntoEditando === a.id">
+            <input v-model="nombreAdjuntoEditando" type="text" class="adjunto-edit-input" />
+            <div class="adjunto-edit-btns">
+              <button type="button" class="btn-small" @click="guardarEdicionAdjunto">Guardar</button>
+              <button type="button" class="btn-small btn-cancel-mini" @click="cancelarEdicionAdjunto">Cancelar</button>
+            </div>
+          </template>
+          <template v-else>
+            <a v-if="a.url" :href="a.url" target="_blank" rel="noopener" class="adjunto-link">📎 {{ a.nombre_original }}</a>
+            <span v-else>📎 {{ a.nombre_original }}</span>
+            <div v-if="puedeModificarAdjunto(a)" class="adjunto-acciones">
+              <button type="button" class="btn-icon-mini" title="Editar nombre" @click="iniciarEdicionAdjunto(a)"><IconEdit class="btn-icon-sm" /></button>
+              <button type="button" class="btn-icon-mini btn-danger-mini" title="Eliminar" @click="eliminarAdjunto(a)"><IconTrash class="btn-icon-sm" /></button>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="adjunto-upload">
+        <input ref="archivoProyecto" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" @change="subirAdjuntoProyecto" />
+        <span v-if="subiendoAdjunto" class="adjunto-loading">Subiendo...</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Tareas</h2>
+      <div class="vencimiento-leyenda">
+        <span class="leyenda-item vencida">Vencida</span>
+        <span class="leyenda-item proxima">Próxima a vencer (7 días)</span>
+        <span class="leyenda-item dentro">Dentro del plazo</span>
+      </div>
+
+      <div v-if="tareasPorVencimiento.vencidas.length" class="tareas-grupo tareas-vencidas">
+        <h3 class="grupo-titulo">Vencida</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="col-orden">Orden</th>
+              <th>Título</th>
+              <th>Estado</th>
+              <th>Avance</th>
+              <th>Fecha de vencimiento</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in tareasPorVencimiento.vencidas" :key="(item.tarea.id as number)" :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '']">
+              <td class="col-orden">{{ item.orden }}</td>
+              <td :class="{ 'cell-indent': item.esSubtarea }">
+                <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
+                {{ item.tarea.titulo }}
+              </td>
+              <td>{{ item.tarea.estado }}</td>
+              <td>{{ item.tarea.porcentaje_avance }}%</td>
+              <td>
+                <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
+                  {{ item.tarea.fecha_vencimiento }}
+                </span>
+                <span v-else class="vencimiento-sin">—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="tareasPorVencimiento.proximas.length" class="tareas-grupo tareas-proximas">
+        <h3 class="grupo-titulo">Próxima a vencer (7 días)</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="col-orden">Orden</th>
+              <th>Título</th>
+              <th>Estado</th>
+              <th>Avance</th>
+              <th>Fecha de vencimiento</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in tareasPorVencimiento.proximas" :key="(item.tarea.id as number)" :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '']">
+              <td class="col-orden">{{ item.orden }}</td>
+              <td :class="{ 'cell-indent': item.esSubtarea }">
+                <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
+                {{ item.tarea.titulo }}
+              </td>
+              <td>{{ item.tarea.estado }}</td>
+              <td>{{ item.tarea.porcentaje_avance }}%</td>
+              <td>
+                <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
+                  {{ item.tarea.fecha_vencimiento }}
+                </span>
+                <span v-else class="vencimiento-sin">—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="tareasPorVencimiento.dentro.length" class="tareas-grupo tareas-dentro">
+        <h3 class="grupo-titulo">Dentro del plazo</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="col-orden">Orden</th>
+              <th>Título</th>
+              <th>Estado</th>
+              <th>Avance</th>
+              <th>Fecha de vencimiento</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in tareasPorVencimiento.dentro" :key="(item.tarea.id as number)" :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '']">
+              <td class="col-orden">{{ item.orden }}</td>
+              <td :class="{ 'cell-indent': item.esSubtarea }">
+                <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
+                {{ item.tarea.titulo }}
+              </td>
+              <td>{{ item.tarea.estado }}</td>
+              <td>{{ item.tarea.porcentaje_avance }}%</td>
+              <td>
+                <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
+                  {{ item.tarea.fecha_vencimiento }}
+                </span>
+                <span v-else class="vencimiento-sin">—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p v-if="!tareasParaTabla.length" class="hint">Sin tareas en este proyecto.</p>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.page h1 { margin: 0; }
+.btn-reasignar {
+  padding: 0.5rem 1rem;
+  background: #16a34a;
+  color: white;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.btn-reasignar:hover {
+  background: #15803d;
+}
+.desc { color: #64748b; margin-bottom: 1rem; }
+.section { margin-top: 1.5rem; }
+.section h2 { font-size: 1rem; margin-bottom: 0.5rem; }
+.list { list-style: none; }
+.list li { padding: 0.25rem 0; }
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { padding: 0.5rem; text-align: left; }
+.section .btn-primary {
+  padding: 0.5rem 1rem;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+.indicadores-list { list-style: none; padding: 0; }
+.indicador-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.indicador-item .meta { color: #64748b; font-size: 0.9rem; }
+.hint { color: #94a3b8; font-size: 0.9rem; }
+.vencimiento-leyenda {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+.leyenda-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.leyenda-item::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.leyenda-item.vencida::before { background: #dc2626; }
+.leyenda-item.proxima::before { background: #eab308; }
+.leyenda-item.dentro::before { background: #22c55e; }
+.vencimiento-vencida { background-color: #fef2f2 !important; border-left: 4px solid #dc2626; }
+.vencimiento-proxima { background-color: #fffbeb !important; border-left: 4px solid #eab308; }
+.vencimiento-dentro-plazo { background-color: #f0fdf4 !important; border-left: 4px solid #22c55e; }
+.vencimiento-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.vencimiento-badge-vencida { background: #fecaca; color: #b91c1c; }
+.vencimiento-badge-proxima { background: #fef08a; color: #a16207; }
+.vencimiento-badge-dentro-plazo { background: #bbf7d0; color: #15803d; }
+.vencimiento-sin { color: #94a3b8; }
+.row-subtarea { background-color: rgba(248, 250, 252, 0.8); }
+.cell-indent { padding-left: 2rem !important; }
+.subtarea-icon { color: #64748b; margin-right: 0.35rem; font-size: 0.9rem; }
+.tareas-grupo { margin-bottom: 1.5rem; }
+.tareas-grupo:last-of-type { margin-bottom: 0; }
+.grupo-titulo {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #334155;
+}
+.tareas-vencidas .grupo-titulo { color: #b91c1c; }
+.tareas-proximas .grupo-titulo { color: #a16207; }
+.tareas-dentro .grupo-titulo { color: #15803d; }
+.col-orden { width: 4rem; text-align: center; font-weight: 600; }
+
+.header-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.btn-exportar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
+  background: #0ea5e9;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn-exportar:hover { background: #0284c7; }
+.btn-icon { width: 1rem; height: 1rem; }
+
+.graficos-section { margin-top: 2rem; }
+.graficos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+.grafico-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 1rem;
+}
+.grafico-titulo { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; color: #334155; }
+.grafico-semáforo .semáforo-bars { display: flex; flex-direction: column; gap: 0.75rem; }
+.semáforo-item { display: flex; align-items: center; gap: 0.75rem; }
+.semáforo-label { font-size: 0.85rem; width: 7rem; color: #475569; }
+.semáforo-bar-wrap {
+  flex: 1;
+  height: 1.25rem;
+  background: #f1f5f9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.semáforo-bar {
+  height: 100%;
+  border-radius: 6px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+.semáforo-bar.vencida { background: #dc2626; }
+.semáforo-bar.proxima { background: #eab308; }
+.semáforo-bar.dentro { background: #22c55e; }
+.semáforo-val { font-weight: 700; font-size: 0.95rem; min-width: 1.5rem; text-align: right; }
+
+.adjuntos-lista { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.5rem; }
+.adjunto-item { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.adjunto-acciones { margin-left: auto; display: flex; gap: 0.25rem; }
+.adjunto-edit-input { flex: 1; min-width: 150px; padding: 0.35rem; font-size: 0.85rem; border: 1px solid #e2e8f0; border-radius: 6px; }
+.adjunto-edit-btns { display: flex; gap: 0.35rem; }
+.btn-icon-mini { padding: 0.2rem 0.4rem; background: #e2e8f0; border: none; border-radius: 4px; cursor: pointer; }
+.btn-icon-mini:hover { background: #cbd5e1; }
+.btn-danger-mini:hover { background: #fecaca !important; }
+.btn-icon-sm { width: 14px; height: 14px; }
+.btn-cancel-mini { background: #94a3b8 !important; }
+.adjunto-link { color: #2563eb; text-decoration: none; font-size: 0.9rem; }
+.adjunto-link:hover { text-decoration: underline; }
+.adjunto-upload input[type="file"] { font-size: 0.85rem; }
+.adjunto-loading { font-size: 0.85rem; color: #64748b; margin-left: 0.5rem; }
+
+</style>

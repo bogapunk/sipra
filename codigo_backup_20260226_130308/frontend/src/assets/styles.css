@@ -1,0 +1,268 @@
+/* Estilos globales para botones - tamaño y alineación uniformes en todo el sistema */
+.btn-action, .btn-action-danger, .btn-action-warn, .btn-action-success {
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+  min-height: 32px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 1px solid;
+}
+.btn-action {
+  border: 1px solid #1565c0;
+  background: #e3f2fd;
+  color: #0d47a1;
+}
+.btn-action:hover {
+  background: #1565c0;
+  color: white;
+}
+.btn-action-danger {
+  border: 1px solid #dc2626;
+  background: #fef2f2;
+  color: #dc2626;
+}
+.btn-action-danger:hover {
+  background: #dc2626;
+  color: white;
+}
+.btn-action-warn {
+  border-color: #d97706;
+  background: #fffbeb;
+  color: #b45309;
+}
+.btn-action-warn:hover {
+  background: #d97706;
+  color: white;
+}
+.btn-action-success {
+  border-color: #16a34a;
+  background: #f0fdf4;
+  color: #15803d;
+}
+.btn-action-success:hover {
+  background: #16a34a;
+  color: white;
+}
+
+/* Columna de acciones en tablas - contenido centrado para uniformidad */
+.table .actions-cell {
+  white-space: nowrap;
+  vertical-align: middle;
+  text-align: center !important;
+}
+/* Encabezado Acciones centrado para uniformidad visual */
+.table th.actions-header {
+  text-align: center !important;
+}
+.table .actions-cell .btn-action,
+.table .actions-cell .btn-action-danger,
+.table .actions-cell .btn-action-warn,
+.table .actions-cell .btn-action-success {
+  margin-right: 0.5rem;
+}
+
+/* Botones de modales: Guardar y Cancelar - mismo tamaño, centrados y uniformes */
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.modal-actions .btn-primary,
+.modal-actions .btn-cancel {
+  padding: 0.5rem 1.25rem;
+  min-width: 110px;
+  min-height: 38px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+.modal-actions .btn-primary {
+  background: #1565c0;
+  color: white;
+}
+.modal-actions .btn-primary:hover:not(:disabled) {
+  background: #0d47a1;
+}
+.modal-actions .btn-primary:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+.modal-actions .btn-cancel {
+  background: #dc2626;
+  color: white;
+}
+.modal-actions .btn-cancel:hover {
+  background: #b91c1c;
+}
+/* btn-primary para otros usos (fuera de modal) */
+.btn-primary {
+  padding: 0.5rem 1.25rem;
+  background: #1565c0;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-primary:hover {
+  background: #0d47a1;
+}
+.btn-cancel {
+  padding: 0.5rem 1.25rem;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-cancel:hover {
+  background: #b91c1c;
+}
+/* Form-inline (ej. ProyectoDetalle etapas): mismos tamaños */
+.form-inline .btn-primary,
+.form-inline .btn-cancel {
+  padding: 0.5rem 1.25rem;
+  min-width: 110px;
+  font-size: 0.95rem;
+}
+
+/* Toolbar: Descargar Excel mismo tamaño y estilo que Nuevo (Usuarios, Áreas, Roles, etc.) */
+.toolbar .btn-primary,
+.toolbar .btn-secondary {
+  padding: 0.5rem 1.25rem !important;
+  font-size: 0.95rem !important;
+  font-weight: 500;
+  border-radius: 8px;
+  min-height: 38px;
+  width: 170px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.toolbar .btn-secondary {
+  background: #16a34a;
+  color: white;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.toolbar .btn-secondary:hover:not(:disabled) {
+  background: #15803d;
+}
+.toolbar .btn-secondary:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+/* Íconos en botones - alineación uniforme */
+.btn-icon, .btn-icon-sm {
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.btn-icon, .btn-icon-sm { margin-right: 0; }
+.toolbar .btn-primary, .toolbar .btn-secondary {
+  gap: 0.4rem;
+}
+
+/* ========== RESPONSIVE ========== */
+/* Contenedor para tablas: scroll horizontal en móvil */
+.table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 1rem;
+}
+
+/* Toolbar responsive: apilar en móvil */
+@media (max-width: 768px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+  .toolbar-buttons {
+    flex-direction: column;
+  }
+  .toolbar .btn-primary,
+  .toolbar .btn-secondary {
+    width: 100%;
+    min-width: unset;
+  }
+  .toolbar .search-input {
+    width: 100%;
+    min-width: 0;
+  }
+  .toolbar input[type="search"] {
+    width: 100%;
+  }
+}
+
+/* Botones de acción en tablas: apilar o reducir en móvil */
+@media (max-width: 640px) {
+  .table .actions-cell .btn-action,
+  .table .actions-cell .btn-action-danger,
+  .table .actions-cell .btn-action-warn,
+  .table .actions-cell .btn-action-success {
+    margin-right: 0.25rem;
+    margin-bottom: 0.25rem;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8rem;
+  }
+}
+
+/* Modales: ancho completo en móvil */
+@media (max-width: 640px) {
+  .modal,
+  .modal-wide {
+    width: 95% !important;
+    max-width: 95vw !important;
+    margin: 1rem;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
+
+/* Páginas: padding reducido en móvil */
+@media (max-width: 768px) {
+  .page {
+    padding: 0;
+  }
+  .page h1 {
+    font-size: 1.35rem;
+  }
+}
+
+/* Toolbar con estado-selector (TareasView): apilar en móvil */
+@media (max-width: 768px) {
+  .toolbar .search-wrapper {
+    min-width: 0;
+    max-width: none;
+  }
+  .toolbar .estado-selector {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.25rem;
+  }
+}
