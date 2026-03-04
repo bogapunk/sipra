@@ -108,7 +108,7 @@ if _db_url:
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': _parsed.path[1:] if _parsed.path else 'sipra',
         'USER': _parsed.username or 'postgres',
-        'PASSWORD': _parsed.password or '',
+        'PASSWORD': _parsed.password or '30153846',
         'HOST': _parsed.hostname or 'localhost',
         'PORT': _parsed.port or 5432,
         'CONN_MAX_AGE': 600,
