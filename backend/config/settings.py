@@ -9,7 +9,7 @@ if not _env_path.exists():
     _env_path = BASE_DIR.parent / '.env'
 if _env_path.exists():
     try:
-        from dotenv import load_dotenv
+        from dotenv import load_dotenv  # type: ignore[reportMissingImports]
         load_dotenv(_env_path)
     except ImportError:
         pass
