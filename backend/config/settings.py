@@ -73,30 +73,50 @@ TEMPLATES = [
     },
 ]
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-        'OPTIONS': {
-            'timeout': 20,
-        }
+# Selector de base de datos:
+# - DB_PROVIDER=sqlite  -> usa db.sqlite3
+# - DB_PROVIDER=postgres -> usa PostgreSQL local o DATABASE_URL
+DB_PROVIDER = os.environ.get('DB_PROVIDER', 'sqlite').strip().lower()
+
+SQLITE_DATABASE = {
+    'ENGINE': 'django.db.backends.sqlite3',
+    'NAME': BASE_DIR / 'db.sqlite3',
+    'OPTIONS': {
+        'timeout': 20,
     }
 }
 
-# PostgreSQL cuando se usa Docker (DATABASE_URL)
+# PostgreSQL configurable por variables de entorno (valores por defecto locales)
+POSTGRES_DATABASE = {
+    'ENGINE': 'django.db.backends.postgresql',
+    'NAME': os.environ.get('POSTGRES_DB_NAME', 'sipra'),
+    'USER': os.environ.get('POSTGRES_DB_USER', 'postgres'),
+    'PASSWORD': os.environ.get('POSTGRES_DB_PASSWORD', '30153846'),
+    'HOST': os.environ.get('POSTGRES_DB_HOST', 'localhost'),
+    'PORT': int(os.environ.get('POSTGRES_DB_PORT', '5432')),
+    'CONN_MAX_AGE': 600,
+}
+
+# Si existe DATABASE_URL, tiene prioridad para Postgres (útil en Render/Docker)
 _db_url = os.environ.get('DATABASE_URL')
 if _db_url:
     from urllib.parse import urlparse
     _parsed = urlparse(_db_url)
-    DATABASES['default'] = {
+    POSTGRES_DATABASE = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': _parsed.path[1:] if _parsed.path else 'sipra',
         'USER': _parsed.username or 'postgres',
         'PASSWORD': _parsed.password or '',
-        'HOST': _parsed.hostname or 'db',
+        'HOST': _parsed.hostname or 'localhost',
         'PORT': _parsed.port or 5432,
         'CONN_MAX_AGE': 600,
     }
+
+DATABASES = {
+    'sqlite': SQLITE_DATABASE,
+    'postgres': POSTGRES_DATABASE,
+    'default': POSTGRES_DATABASE if DB_PROVIDER == 'postgres' else SQLITE_DATABASE,
+}
 
 LANGUAGE_CODE = 'es'
 TIME_ZONE = 'America/Argentina/Buenos_Aires'
