@@ -13,7 +13,7 @@ cd /d "%~dp0backend"
 python manage.py restaurar_sistema_completo
 
 echo.
-echo ========================================
+echo ===========================================
 echo   Proceso finalizado
 echo ========================================
 echo.
