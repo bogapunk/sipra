@@ -1,6 +1,6 @@
 databases:
   - name: sipra-postgres
-    databaseName: sipra_db
+    databaseName: sipra
     user: sipra_user
     plan: free
 

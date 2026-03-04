@@ -90,7 +90,7 @@ if _db_url:
     _parsed = urlparse(_db_url)
     DATABASES['default'] = {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': _parsed.path[1:] if _parsed.path else 'seguimiento_proyectos',
+        'NAME': _parsed.path[1:] if _parsed.path else 'sipra',
         'USER': _parsed.username or 'postgres',
         'PASSWORD': _parsed.password or '',
         'HOST': _parsed.hostname or 'db',
