@@ -5,9 +5,10 @@ from django.conf.urls.static import static
 
 
 def api_root(request):
+    base = request.build_absolute_uri('/').rstrip('/')
     return JsonResponse({
         "mensaje": "API Sistema de Seguimiento de Proyectos",
-        "api": "http://localhost:8001/api/",
+        "api": f"{base}/api/",
         "endpoints": ["/api/proyectos/", "/api/tareas/", "/api/areas/", "/api/usuarios/", "/api/roles/", "/api/dashboard/ejecutivo/"],
     })
 
@@ -16,5 +17,5 @@ urlpatterns = [
     path("", api_root),
     path("api/", include("projects.urls")),
 ]
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# En Render servimos media desde Django para simplificar despliegue.
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
