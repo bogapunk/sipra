@@ -74,9 +74,11 @@ TEMPLATES = [
 ]
 
 # Selector de base de datos:
-# - DB_PROVIDER=sqlite  -> usa db.sqlite3
+# - DB_PROVIDER=sqlite   -> usa db.sqlite3
 # - DB_PROVIDER=postgres -> usa PostgreSQL local o DATABASE_URL
-DB_PROVIDER = os.environ.get('DB_PROVIDER', 'sqlite').strip().lower()
+# - Si existe DATABASE_URL y DB_PROVIDER no está definido, usa PostgreSQL automáticamente.
+_db_provider_env = os.environ.get('DB_PROVIDER')
+DB_PROVIDER = (_db_provider_env or 'sqlite').strip().lower()
 
 SQLITE_DATABASE = {
     'ENGINE': 'django.db.backends.sqlite3',
@@ -112,10 +114,15 @@ if _db_url:
         'CONN_MAX_AGE': 600,
     }
 
+# Selección final:
+# - Forzar postgres por variable
+# - O activar postgres automáticamente si hay DATABASE_URL
+_use_postgres = (DB_PROVIDER == 'postgres') or bool(_db_url)
+
 DATABASES = {
     'sqlite': SQLITE_DATABASE,
     'postgres': POSTGRES_DATABASE,
-    'default': POSTGRES_DATABASE if DB_PROVIDER == 'postgres' else SQLITE_DATABASE,
+    'default': POSTGRES_DATABASE if _use_postgres else SQLITE_DATABASE,
 }
 
 LANGUAGE_CODE = 'es'
