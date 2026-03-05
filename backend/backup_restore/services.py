@@ -8,6 +8,7 @@ from datetime import datetime
 
 from django.conf import settings
 from django.db import connection
+from django.core.management import call_command
 
 # Carpetas y archivos a excluir del backup de código
 CODE_BACKUP_EXCLUDE = {
@@ -69,8 +70,9 @@ def _create_postgresql_backup():
 
     env = os.environ.copy()
     env['PGPASSWORD'] = db.get('PASSWORD', '')
+    pg_dump_bin = getattr(settings, 'PG_DUMP_PATH', '') or shutil.which('pg_dump') or 'pg_dump'
     cmd = [
-        'pg_dump',
+        pg_dump_bin,
         '-h', db.get('HOST', 'localhost'),
         '-p', str(db.get('PORT', 5432)),
         '-U', db.get('USER', 'postgres'),
@@ -84,7 +86,27 @@ def _create_postgresql_backup():
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"pg_dump falló: {e.stderr.decode() if e.stderr else str(e)}")
     except FileNotFoundError:
-        raise RuntimeError("pg_dump no encontrado. Instale PostgreSQL client (pg_dump) en el PATH.")
+        # Fallback compatible con entornos gestionados (ej. Render sin cliente postgres instalado)
+        return _create_postgresql_backup_fallback_json(backup_dir, timestamp)
+
+
+def _create_postgresql_backup_fallback_json(backup_dir: Path, timestamp: str):
+    """
+    Fallback de backup para PostgreSQL cuando pg_dump no está disponible.
+    Genera un dump JSON con dumpdata.
+    """
+    backup_name = f"backup_{timestamp}.json"
+    backup_path = backup_dir / backup_name
+    with open(backup_path, 'w', encoding='utf-8') as f:
+        call_command(
+            'dumpdata',
+            '--natural-foreign',
+            '--natural-primary',
+            '-e', 'contenttypes',
+            '-e', 'auth.permission',
+            stdout=f,
+        )
+    return str(backup_path)
 
 
 def create_backup():
@@ -125,8 +147,13 @@ def list_backups():
 
     backup_dir = ensure_backup_dir()
     backups = []
-    pattern = 'backup_*.sql' if is_postgresql() else 'backup_*.sqlite3'
-    for f in sorted(backup_dir.glob(pattern), reverse=True):
+    patterns = ['backup_*.sqlite3']
+    if is_postgresql():
+        patterns = ['backup_*.sql', 'backup_*.json']
+    files = []
+    for pattern in patterns:
+        files.extend(list(backup_dir.glob(pattern)))
+    for f in sorted(files, reverse=True):
         stat = f.stat()
         backups.append({
             'filename': f.name,
@@ -209,7 +236,7 @@ def delete_backup(filename: str):
     """Elimina un archivo de backup de BD. Valida que el nombre sea seguro."""
     if not filename or '..' in filename or '/' in filename or '\\' in filename:
         raise RuntimeError("Nombre de archivo no válido")
-    if not filename.endswith('.sqlite3') and not filename.endswith('.sql'):
+    if not filename.endswith('.sqlite3') and not filename.endswith('.sql') and not filename.endswith('.json'):
         raise RuntimeError("Solo se pueden eliminar archivos de backup de BD")
     backup_dir = ensure_backup_dir()
     path = backup_dir / filename

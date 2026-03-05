@@ -17,5 +17,5 @@ urlpatterns = [
     path("", api_root),
     path("api/", include("projects.urls")),
 ]
-# En Render servimos media desde Django para simplificar despliegue.
+# Servir archivos media desde Django en despliegues simples.
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

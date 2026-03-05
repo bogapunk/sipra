@@ -65,6 +65,11 @@ export function invalidateApiCache(pattern?: string) {
 }
 
 api.interceptors.request.use((config) => {
+  // Tras POST/PATCH/PUT/DELETE, limpiamos caché para forzar refresco de paneles.
+  const method = (config.method || 'get').toLowerCase()
+  if (method !== 'get') {
+    invalidateApiCache()
+  }
   const token = localStorage.getItem('sistema_proyectos_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`

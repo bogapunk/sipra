@@ -74,11 +74,17 @@ TEMPLATES = [
 ]
 
 # Selector de base de datos:
-# - DB_PROVIDER=sqlite   -> usa db.sqlite3
-# - DB_PROVIDER=postgres -> usa PostgreSQL local o DATABASE_URL
-# - Si existe DATABASE_URL y DB_PROVIDER no está definido, usa PostgreSQL automáticamente.
+# - DB_PROVIDER=postgres (por defecto recomendado)
+# - DB_PROVIDER=sqlite   (solo uso explícito/local)
 _db_provider_env = os.environ.get('DB_PROVIDER')
-DB_PROVIDER = (_db_provider_env or 'sqlite').strip().lower()
+DB_PROVIDER = (_db_provider_env or 'postgres').strip().lower()
+ALLOW_SQLITE = os.environ.get('ALLOW_SQLITE', '0').strip().lower() in ('1', 'true', 'yes')
+if DB_PROVIDER == 'sqlite' and not ALLOW_SQLITE:
+    raise ValueError(
+        "SQLite está deshabilitado en este proyecto. "
+        "Use PostgreSQL (DB_PROVIDER=postgres). "
+        "Si realmente necesita SQLite de forma temporal, defina ALLOW_SQLITE=1."
+    )
 
 SQLITE_DATABASE = {
     'ENGINE': 'django.db.backends.sqlite3',
@@ -88,7 +94,7 @@ SQLITE_DATABASE = {
     }
 }
 
-# PostgreSQL configurable por variables de entorno (valores por defecto locales)
+# PostgreSQL configurable por variables de entorno
 POSTGRES_DATABASE = {
     'ENGINE': 'django.db.backends.postgresql',
     'NAME': os.environ.get('POSTGRES_DB_NAME', 'sipra'),
@@ -99,7 +105,7 @@ POSTGRES_DATABASE = {
     'CONN_MAX_AGE': 600,
 }
 
-# Si existe DATABASE_URL, tiene prioridad para Postgres (útil en Render/Docker)
+# Si existe DATABASE_URL, tiene prioridad para Postgres
 _db_url = os.environ.get('DATABASE_URL')
 if _db_url:
     from urllib.parse import urlparse
@@ -108,16 +114,16 @@ if _db_url:
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': _parsed.path[1:] if _parsed.path else 'sipra',
         'USER': _parsed.username or 'postgres',
-        'PASSWORD': _parsed.password or '30153846',
+        'PASSWORD': _parsed.password or 'postgres',
         'HOST': _parsed.hostname or 'localhost',
         'PORT': _parsed.port or 5432,
         'CONN_MAX_AGE': 600,
     }
 
 # Selección final:
-# - Forzar postgres por variable
-# - O activar postgres automáticamente si hay DATABASE_URL
-_use_postgres = (DB_PROVIDER == 'postgres') or bool(_db_url)
+# - PostgreSQL por defecto
+# - SQLite solo por pedido explícito (DB_PROVIDER=sqlite)
+_use_postgres = DB_PROVIDER != 'sqlite'
 
 DATABASES = {
     'sqlite': SQLITE_DATABASE,
@@ -152,4 +158,5 @@ else:
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', BASE_DIR / 'backups'))
 CODE_BACKUP_DIR = Path(os.environ.get('CODE_BACKUP_DIR', BACKUP_DIR / 'code'))
 BACKUP_SCRIPT_PATH = os.environ.get('BACKUP_SCRIPT_PATH', '')  # ej: /opt/scripts/backup.sh
+PG_DUMP_PATH = os.environ.get('PG_DUMP_PATH', '')  # opcional: ruta absoluta a pg_dump
 ACTIVE_SESSION_MINUTES = int(os.environ.get('ACTIVE_SESSION_MINUTES', 5))

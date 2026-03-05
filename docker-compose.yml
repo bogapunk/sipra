@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: sipra
       POSTGRES_USER: sipra
@@ -20,7 +18,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgres://sipra:sipra_secret@db:5432/sipra
+      DB_PROVIDER: postgres
+      DATABASE_URL: postgresql://sipra:sipra_secret@db:5432/sipra
       DEBUG: ${DEBUG:-0}
       SECRET_KEY: ${SECRET_KEY:-cambiar-en-produccion-clave-secreta-larga}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}

@@ -10,6 +10,7 @@ import IconTrash from '@/components/icons/IconTrash.vue'
 import IconSave from '@/components/icons/IconSave.vue'
 import IconCancel from '@/components/icons/IconCancel.vue'
 import { validarPassword } from '@/utils/validarPassword'
+import { extraerMensajeError } from '@/utils/apiError'
 import { useConfirmDelete } from '@/composables/useConfirmDelete'
 import { useToast } from '@/composables/useToast'
 import { useModalClose } from '@/composables/useModalClose'
@@ -190,8 +191,8 @@ const save = async () => {
     }
     showForm.value = false
     load()
-  } catch {
-    toast.error('Error al guardar el usuario.')
+  } catch (e) {
+    toast.error(extraerMensajeError(e, 'Error al guardar el usuario.'))
   }
 }
 
@@ -201,8 +202,8 @@ const remove = async (id: number) => {
       await api.delete(`usuarios/${id}/`)
       toast.success('Registro eliminado correctamente.')
       load()
-    } catch {
-      toast.error('Error al eliminar el usuario.')
+    } catch (e) {
+      toast.error(extraerMensajeError(e, 'Error al eliminar el usuario.'))
     }
   }
 }
