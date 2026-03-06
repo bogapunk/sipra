@@ -70,7 +70,7 @@ class IndicadorViewSet(viewsets.ModelViewSet):
 
 
 class ProyectoViewSet(viewsets.ModelViewSet):
-    queryset = Proyecto.objects.select_related('usuario_responsable', 'area', 'secretaria', 'creado_por')
+    queryset = Proyecto.objects.select_related('usuario_responsable', 'area', 'secretaria', 'creado_por').order_by('id')
     serializer_class = ProyectoSerializer
 
     def get_object(self):
@@ -105,7 +105,7 @@ class ProyectoViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Proyecto.objects.select_related(
             'usuario_responsable', 'area', 'secretaria', 'creado_por'
-        ).prefetch_related('equipo', 'proyectoarea_set')
+        ).prefetch_related('equipo', 'proyectoarea_set').order_by('id')
         secretaria_id = self.request.query_params.get('secretaria')
         area_id = self.request.query_params.get('area')
         if secretaria_id:

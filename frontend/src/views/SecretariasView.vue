@@ -12,6 +12,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useToast } from '@/composables/useToast'
 import { useModalClose } from '@/composables/useModalClose'
 import { exportToCsv } from '@/utils/exportCsv'
+import { extraerMensajeError } from '@/utils/apiError'
 import EmptyState from '@/components/EmptyState.vue'
 
 const router = useRouter()
@@ -27,6 +28,15 @@ const editingId = ref<number | null>(null)
 const form = ref({ codigo: '', nombre: '', descripcion: '', activa: true })
 const errorCodigo = ref('')
 const errorNombre = ref('')
+
+function parseListResponse(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  if (payload && typeof payload === 'object' && 'results' in (payload as object)) {
+    const results = (payload as { results?: unknown }).results
+    return Array.isArray(results) ? (results as Record<string, unknown>[]) : []
+  }
+  return []
+}
 
 function validarCampos() {
   let ok = true
@@ -68,9 +78,10 @@ async function descargarExcel() {
 const load = async () => {
   try {
     const res = await api.get('secretarias/')
-    secretarias.value = Array.isArray(res.data) ? res.data : []
-  } catch {
+    secretarias.value = parseListResponse(res.data)
+  } catch (e) {
     secretarias.value = []
+    toast.error(extraerMensajeError(e, 'No se pudieron cargar las secretarías.'))
   }
 }
 

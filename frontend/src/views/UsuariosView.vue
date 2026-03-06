@@ -48,17 +48,31 @@ function parseAreas(res: unknown): Record<string, unknown>[] {
   return []
 }
 
+function parseListResponse(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  if (payload && typeof payload === 'object' && 'results' in (payload as object)) {
+    const results = (payload as { results?: unknown }).results
+    return Array.isArray(results) ? (results as Record<string, unknown>[]) : []
+  }
+  return []
+}
+
 const load = async () => {
-  const [u, r, a, s] = await Promise.all([
+  const [u, r, a, s] = await Promise.allSettled([
     api.get('usuarios/'),
     api.get('roles/'),
     api.get('areas/', { params: { estado: 'true' } }),
     api.get('secretarias/', { params: { activa: 'true' } }),
   ])
-  usuarios.value = u.data
-  roles.value = r.data
-  areas.value = parseAreas(a)
-  secretarias.value = Array.isArray(s.data) ? s.data : []
+
+  usuarios.value = u.status === 'fulfilled' ? parseListResponse(u.value.data) : []
+  roles.value = r.status === 'fulfilled' ? parseListResponse(r.value.data) : []
+  areas.value = a.status === 'fulfilled' ? parseAreas(a.value) : []
+  secretarias.value = s.status === 'fulfilled' ? parseListResponse(s.value.data) : []
+
+  if ([u, r, a, s].some((res) => res.status === 'rejected')) {
+    toast.error('No se pudieron cargar todos los catálogos de usuarios. Revise la conexión con el backend.')
+  }
 }
 
 const usuariosFiltrados = computed(() => {

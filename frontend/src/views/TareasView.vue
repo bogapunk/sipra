@@ -66,23 +66,41 @@ const form = ref({
   prioridad: 'Media',
 })
 
+function parseListResponse(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  if (payload && typeof payload === 'object' && 'results' in (payload as object)) {
+    const results = (payload as { results?: unknown }).results
+    return Array.isArray(results) ? (results as Record<string, unknown>[]) : []
+  }
+  return []
+}
+
+async function cargarProyectosParaSelector() {
+  try {
+    const res = await api.get('dashboard/proyectos/')
+    proyectos.value = parseListResponse(res.data)
+  } catch {
+    const res = await api.get('proyectos/')
+    proyectos.value = parseListResponse(res.data)
+  }
+}
+
 const load = async () => {
   const params: Record<string, string | number> = {}
   if (filtroEstado.value) params.estado = filtroEstado.value
-  const [t, p, a, s, uRes] = await Promise.all([
+  const [t, a, s, uRes] = await Promise.all([
     api.get('tareas/', { params }),
-    api.get('proyectos/'),
     api.get('areas/', { params: { estado: 'true' } }),
     api.get('secretarias/', { params: { activa: 'true' } }),
     api.get('usuarios/selector/').catch(() => api.get('usuarios/').then(r => ({
       data: Array.isArray(r.data) ? r.data : (r.data?.results ?? []),
     })).catch(() => ({ data: [] }))),
   ])
-  tareas.value = Array.isArray(t.data) ? t.data : (t.data?.results ?? [])
-  proyectos.value = Array.isArray(p.data) ? p.data : (p.data?.results ?? [])
-  areas.value = Array.isArray(a.data) ? a.data : (a.data?.results ?? [])
-  secretarias.value = Array.isArray(s.data) ? s.data : (s.data?.results ?? [])
-  usuarios.value = Array.isArray(uRes.data) ? uRes.data : (uRes.data?.results ?? [])
+  tareas.value = parseListResponse(t.data)
+  areas.value = parseListResponse(a.data)
+  secretarias.value = parseListResponse(s.data)
+  usuarios.value = parseListResponse(uRes.data)
+  await cargarProyectosParaSelector()
 }
 
 async function loadUsuariosParaResponsable() {
@@ -113,8 +131,9 @@ watch(
   { deep: true }
 )
 
-const openCreate = () => {
+const openCreate = async () => {
   editingId.value = null
+  await cargarProyectosParaSelector()
   tipoOrganizacion.value = 'area'
   form.value = {
     proyecto: null,

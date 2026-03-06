@@ -38,6 +38,7 @@ class Tarea(models.Model):
     estado = models.CharField(max_length=20, choices=ESTADOS, default="Pendiente")
     porcentaje_avance = models.IntegerField(default=0)
     prioridad = models.CharField(max_length=20, choices=PRIORIDADES, default="Media")
+    orden = models.PositiveIntegerField(default=0, db_index=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
 
     def clean(self):

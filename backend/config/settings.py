@@ -73,62 +73,35 @@ TEMPLATES = [
     },
 ]
 
-# Selector de base de datos:
-# - DB_PROVIDER=postgres (por defecto recomendado)
-# - DB_PROVIDER=sqlite   (solo uso explícito/local)
-_db_provider_env = os.environ.get('DB_PROVIDER')
-DB_PROVIDER = (_db_provider_env or 'postgres').strip().lower()
-ALLOW_SQLITE = os.environ.get('ALLOW_SQLITE', '0').strip().lower() in ('1', 'true', 'yes')
-if DB_PROVIDER == 'sqlite' and not ALLOW_SQLITE:
-    raise ValueError(
-        "SQLite está deshabilitado en este proyecto. "
-        "Use PostgreSQL (DB_PROVIDER=postgres). "
-        "Si realmente necesita SQLite de forma temporal, defina ALLOW_SQLITE=1."
-    )
+# PostgreSQL obligatorio en este proyecto.
+def _env_str(name: str, default: str = '') -> str:
+    return (os.environ.get(name, default) or default).strip()
 
-SQLITE_DATABASE = {
-    'ENGINE': 'django.db.backends.sqlite3',
-    'NAME': BASE_DIR / 'db.sqlite3',
-    'OPTIONS': {
-        'timeout': 20,
-    }
-}
 
-# PostgreSQL configurable por variables de entorno
+def _env_host(name: str, default: str = 'localhost') -> str:
+    """
+    Normaliza host para evitar errores por espacios/comillas accidentales
+    en variables de entorno (ej: "localhost ").
+    """
+    raw = _env_str(name, default).strip().strip('"').strip("'")
+    if not raw:
+        return default
+    return raw.split()[0]
+
+
+# PostgreSQL configurable por variables de entorno (sanitiza espacios)
 POSTGRES_DATABASE = {
     'ENGINE': 'django.db.backends.postgresql',
-    'NAME': os.environ.get('POSTGRES_DB_NAME', 'sipra'),
-    'USER': os.environ.get('POSTGRES_DB_USER', 'postgres'),
-    'PASSWORD': os.environ.get('POSTGRES_DB_PASSWORD', '30153846'),
-    'HOST': os.environ.get('POSTGRES_DB_HOST', 'localhost'),
-    'PORT': int(os.environ.get('POSTGRES_DB_PORT', '5432')),
+    'NAME': _env_str('POSTGRES_DB_NAME', 'sipra'),
+    'USER': _env_str('POSTGRES_DB_USER', 'postgres'),
+    'PASSWORD': _env_str('POSTGRES_DB_PASSWORD', '30153846'),
+    'HOST': _env_host('POSTGRES_DB_HOST', 'localhost'),
+    'PORT': int(_env_str('POSTGRES_DB_PORT', '5432')),
     'CONN_MAX_AGE': 600,
 }
 
-# Si existe DATABASE_URL, tiene prioridad para Postgres
-_db_url = os.environ.get('DATABASE_URL')
-if _db_url:
-    from urllib.parse import urlparse
-    _parsed = urlparse(_db_url)
-    POSTGRES_DATABASE = {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': _parsed.path[1:] if _parsed.path else 'sipra',
-        'USER': _parsed.username or 'postgres',
-        'PASSWORD': _parsed.password or 'postgres',
-        'HOST': _parsed.hostname or 'localhost',
-        'PORT': _parsed.port or 5432,
-        'CONN_MAX_AGE': 600,
-    }
-
-# Selección final:
-# - PostgreSQL por defecto
-# - SQLite solo por pedido explícito (DB_PROVIDER=sqlite)
-_use_postgres = DB_PROVIDER != 'sqlite'
-
 DATABASES = {
-    'sqlite': SQLITE_DATABASE,
-    'postgres': POSTGRES_DATABASE,
-    'default': POSTGRES_DATABASE if _use_postgres else SQLITE_DATABASE,
+    'default': POSTGRES_DATABASE,
 }
 
 LANGUAGE_CODE = 'es'

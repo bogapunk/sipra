@@ -96,9 +96,10 @@ const secretariaFiltroNombre = computed(() => {
 })
 
 const proyectosFiltrados = computed(() => {
+  const ordenados = [...proyectos.value].sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
   const q = buscarProyecto.value.trim().toLowerCase()
-  if (!q) return proyectos.value
-  return proyectos.value.filter((p: Record<string, unknown>) =>
+  if (!q) return ordenados
+  return ordenados.filter((p: Record<string, unknown>) =>
     String(p.nombre || '').toLowerCase().includes(q)
   )
 })

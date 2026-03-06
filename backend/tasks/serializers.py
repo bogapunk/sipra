@@ -20,7 +20,7 @@ class TareaSerializer(serializers.ModelSerializer):
     def get_subtareas(self, obj):
         if self.context.get('subtarea'):
             return []
-        hijos = obj.subtareas.select_related('area', 'secretaria', 'proyecto', 'responsable').order_by('id')
+        hijos = obj.subtareas.select_related('area', 'secretaria', 'proyecto', 'responsable').order_by('orden', 'id')
         return TareaSerializer(hijos, many=True, context={'subtarea': True}).data
 
     def get_secretaria_nombre(self, obj):
@@ -68,7 +68,7 @@ class TareaSerializer(serializers.ModelSerializer):
         fields = ['id', 'proyecto', 'proyecto_nombre', 'tarea_padre', 'tarea_padre_nombre', 'subtareas',
                   'etapa', 'area', 'area_nombre', 'secretaria', 'secretaria_nombre',
                   'organizacion_nombre', 'titulo', 'descripcion', 'responsable', 'responsable_nombre',
-                  'fecha_inicio', 'fecha_vencimiento', 'estado', 'porcentaje_avance', 'prioridad', 'fecha_creacion']
+                  'fecha_inicio', 'fecha_vencimiento', 'estado', 'porcentaje_avance', 'prioridad', 'orden', 'fecha_creacion']
 
 
 class HistorialTareaSerializer(serializers.ModelSerializer):

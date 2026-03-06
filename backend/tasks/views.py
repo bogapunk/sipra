@@ -2,7 +2,7 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
-from django.db.models import Q, Prefetch
+from django.db.models import Q, Prefetch, Max
 from .models import Tarea, HistorialTarea, ComentarioTarea, AdjuntoTarea
 from projects.models import AdjuntoAuditLog
 from .serializers import TareaSerializer, HistorialTareaSerializer, ComentarioTareaSerializer, AdjuntoTareaSerializer
@@ -24,6 +24,14 @@ class TareaViewSet(viewsets.ModelViewSet):
             instance.proyecto = instance.tarea_padre.proyecto
             instance.etapa = instance.tarea_padre.etapa
             instance.save(update_fields=['proyecto', 'etapa'])
+        if not instance.orden:
+            siblings = Tarea.objects.filter(
+                proyecto_id=instance.proyecto_id,
+                tarea_padre_id=instance.tarea_padre_id,
+            ).exclude(id=instance.id)
+            max_orden = siblings.aggregate(max_orden=Max('orden')).get('max_orden') or 0
+            instance.orden = max_orden + 1
+            instance.save(update_fields=['orden'])
 
     def perform_update(self, serializer):
         instance = serializer.save()
@@ -41,7 +49,10 @@ class TareaViewSet(viewsets.ModelViewSet):
         qs = Tarea.objects.select_related(
             'area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'
         ).prefetch_related(
-            Prefetch('subtareas', queryset=Tarea.objects.select_related('area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'))
+            Prefetch(
+                'subtareas',
+                queryset=Tarea.objects.select_related('area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre').order_by('orden', 'id')
+            )
         )
         proyecto = self.request.query_params.get("proyecto")
         area = self.request.query_params.get("area")
@@ -75,7 +86,7 @@ class TareaViewSet(viewsets.ModelViewSet):
             qs = qs.filter(estado=estado)
         if responsable and not usuario:
             qs = qs.filter(responsable_id=responsable)
-        return qs
+        return qs.order_by('tarea_padre_id', 'orden', 'id')
 
 
 class HistorialTareaViewSet(viewsets.ModelViewSet):

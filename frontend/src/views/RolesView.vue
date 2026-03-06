@@ -12,6 +12,7 @@ import { useConfirmDelete } from '@/composables/useConfirmDelete'
 import { useToast } from '@/composables/useToast'
 import { useModalClose } from '@/composables/useModalClose'
 import { exportToCsv } from '@/utils/exportCsv'
+import { extraerMensajeError } from '@/utils/apiError'
 import EmptyState from '@/components/EmptyState.vue'
 
 const { confirmDelete } = useConfirmDelete()
@@ -24,6 +25,15 @@ const rolVer = ref<Record<string, unknown> | null>(null)
 const editingId = ref<number | null>(null)
 const form = ref({ nombre: '', descripcion: '' })
 const errorNombre = ref('')
+
+function parseListResponse(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  if (payload && typeof payload === 'object' && 'results' in (payload as object)) {
+    const results = (payload as { results?: unknown }).results
+    return Array.isArray(results) ? (results as Record<string, unknown>[]) : []
+  }
+  return []
+}
 
 function validarNombre() {
   if (!form.value.nombre.trim()) {
@@ -54,7 +64,13 @@ async function descargarExcel() {
 }
 
 const load = async () => {
-  roles.value = (await api.get('roles/')).data
+  try {
+    const res = await api.get('roles/')
+    roles.value = parseListResponse(res.data)
+  } catch (e) {
+    roles.value = []
+    toast.error(extraerMensajeError(e, 'No se pudieron cargar los roles.'))
+  }
 }
 
 const openVer = (r: Record<string, unknown>) => {

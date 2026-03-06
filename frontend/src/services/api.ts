@@ -17,7 +17,6 @@ const CACHEABLE = [
   /^programas\/?(\?|$)/, /^programas\/[\w-]+\/?(\?|$)/,
   /^objetivos-estrategicos\/\d+\/?(\?|$)/,
   /^objetivos-estrategicos\/?(\?|$)/, /^indicadores\/?(\?|$)/,
-  /^proyectos\/?(\?|$)/, /^proyectos\/\d+\/?(\?|$)/,
   /^dashboard\/proyectos\/\d+\//,
   // dashboard/proyectos/ NO cacheado: el Dashboard debe mostrar siempre el conteo real
   /^dashboard\/usuarios\/\d+\/proyectos\/?(\?|$)/,

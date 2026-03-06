@@ -153,7 +153,7 @@ class ProyectosDashboardView(APIView):
         proyectos = Proyecto.objects.select_related('creado_por', 'secretaria', 'usuario_responsable', 'area').prefetch_related(
             Prefetch('proyectoarea_set', queryset=ProyectoArea.objects.select_related('area')),
             Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario'))
-        ).all()
+        ).order_by('id')
         secretaria_id = request.query_params.get('secretaria')
         if secretaria_id:
             proyectos = proyectos.filter(secretaria_id=secretaria_id)

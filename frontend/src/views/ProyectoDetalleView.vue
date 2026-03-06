@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onActivated, onDeactivated, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getProyecto } from '@/services/proyectos'
 import { getTareas } from '@/services/tareas'
@@ -28,6 +28,12 @@ const archivoProyecto = ref<HTMLInputElement | null>(null)
 const subiendoAdjunto = ref(false)
 const adjuntoEditando = ref<number | null>(null)
 const nombreAdjuntoEditando = ref('')
+const AUTO_REFRESH_MS = 12000
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+const modoOrden = ref(false)
+const guardandoOrden = ref(false)
+const draggedTaskId = ref<number | null>(null)
+const dragOverTaskId = ref<number | null>(null)
 
 function puedeModificarAdjunto(a: Record<string, unknown>): boolean {
   if (!user.value) return false
@@ -37,15 +43,28 @@ function puedeModificarAdjunto(a: Record<string, unknown>): boolean {
 
 const proyectoId = computed(() => Number(route.params.id))
 
+function parseListResponse(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  if (payload && typeof payload === 'object' && 'results' in (payload as object)) {
+    const results = (payload as { results?: unknown }).results
+    return Array.isArray(results) ? (results as Record<string, unknown>[]) : []
+  }
+  return []
+}
+
 const load = async () => {
   const id = proyectoId.value
-  proyecto.value = (await getProyecto(id)).data
-  tareas.value = (await getTareas({ proyecto: id })).data
-  etapas.value = (await api.get('etapas/', { params: { proyecto: id } })).data
-  const [indRes, adjRes] = await Promise.all([
+  const [proyRes, tareasRes, etapasRes, indRes, adjRes] = await Promise.all([
+    getProyecto(id),
+    // _ts fuerza bypass de caché para reflejar tareas recién creadas.
+    getTareas({ proyecto: id, _ts: Date.now() }),
+    api.get('etapas/', { params: { proyecto: id } }),
     api.get('indicadores/', { params: { proyecto: id } }),
     api.get('adjuntos-proyecto/', { params: { proyecto: id } }),
   ])
+  proyecto.value = proyRes.data as Record<string, unknown>
+  tareas.value = parseListResponse(tareasRes.data)
+  etapas.value = parseListResponse(etapasRes.data)
   indicadores.value = Array.isArray(indRes.data) ? indRes.data : (indRes.data?.results || [])
   adjuntos.value = Array.isArray(adjRes.data) ? adjRes.data : (adjRes.data?.results || [])
 }
@@ -113,11 +132,18 @@ async function eliminarAdjunto(a: Record<string, unknown>) {
 const tareasParaTabla = computed(() => {
   const lista = tareas.value
   const resultado: { tarea: Record<string, unknown>; esSubtarea: boolean; orden: string }[] = []
-  const raices = lista.filter((t: Record<string, unknown>) => !t.tarea_padre)
+  const ordenar = (arr: Record<string, unknown>[]) =>
+    [...arr].sort((a, b) => {
+      const oa = Number(a.orden || 0)
+      const ob = Number(b.orden || 0)
+      if (oa !== ob) return oa - ob
+      return Number(a.id || 0) - Number(b.id || 0)
+    })
+  const raices = ordenar(lista.filter((t: Record<string, unknown>) => !t.tarea_padre))
   let idx = 1
   for (const t of raices) {
     resultado.push({ tarea: t, esSubtarea: false, orden: String(idx) })
-    const hijos = (t.subtareas as Record<string, unknown>[]) || []
+    const hijos = ordenar(((t.subtareas as Record<string, unknown>[]) || []))
     hijos.forEach((h, j) => {
       resultado.push({ tarea: h, esSubtarea: true, orden: `${idx}.${j + 1}` })
     })
@@ -131,6 +157,87 @@ const tareasParaTabla = computed(() => {
   }
   return resultado
 })
+
+function siblingsDeTarea(tarea: Record<string, unknown>) {
+  const padreId = getParentId(tarea)
+  return [...tareas.value]
+    .filter((t) => {
+      return getParentId(t) === padreId
+    })
+    .sort((a, b) => {
+      const oa = Number(a.orden || 0)
+      const ob = Number(b.orden || 0)
+      if (oa !== ob) return oa - ob
+      return Number(a.id || 0) - Number(b.id || 0)
+    })
+}
+
+function getParentId(tarea: Record<string, unknown>) {
+  const padreRaw = tarea.tarea_padre
+  return padreRaw && typeof padreRaw === 'object'
+    ? Number((padreRaw as { id?: number }).id || 0)
+    : Number(padreRaw || 0)
+}
+
+function getTaskById(id: number) {
+  return tareas.value.find((t) => Number(t.id) === id) || null
+}
+
+function onDragStart(tarea: Record<string, unknown>) {
+  if (!modoOrden.value || isVisualizador.value || guardandoOrden.value) return
+  draggedTaskId.value = Number(tarea.id)
+}
+
+function onDragEnd() {
+  draggedTaskId.value = null
+  dragOverTaskId.value = null
+}
+
+function onDragOver(tarea: Record<string, unknown>) {
+  if (!modoOrden.value || isVisualizador.value || guardandoOrden.value) return
+  dragOverTaskId.value = Number(tarea.id)
+}
+
+async function onDrop(targetTarea: Record<string, unknown>) {
+  const movedId = draggedTaskId.value
+  const targetId = Number(targetTarea.id)
+  onDragEnd()
+  if (!movedId || movedId === targetId || guardandoOrden.value) return
+
+  const movedTask = getTaskById(movedId)
+  const targetTask = getTaskById(targetId)
+  if (!movedTask || !targetTask) return
+
+  if (getParentId(movedTask) !== getParentId(targetTask)) {
+    toast.error('Solo puede reordenar tareas dentro del mismo nivel.')
+    return
+  }
+
+  const siblings = siblingsDeTarea(targetTask)
+  const remaining = siblings.filter((s) => Number(s.id) !== movedId)
+  const targetIndex = remaining.findIndex((s) => Number(s.id) === targetId)
+  if (targetIndex < 0) return
+  remaining.splice(targetIndex, 0, movedTask)
+
+  const reordered = remaining
+  const cambios = reordered
+    .map((item, i) => ({ id: Number(item.id), orden: i + 1 }))
+    .filter(({ id, orden }) => {
+      const current = siblings.find((s) => Number(s.id) === id)
+      return Number(current?.orden || 0) !== orden
+    })
+  if (!cambios.length) return
+  guardandoOrden.value = true
+  try {
+    await Promise.all(cambios.map((c) => api.patch(`tareas/${c.id}/`, { orden: c.orden })))
+    await actualizarTareasSilencioso()
+    toast.success('Orden de tareas actualizado.')
+  } catch {
+    toast.error('No se pudo guardar el nuevo orden.')
+  } finally {
+    guardandoOrden.value = false
+  }
+}
 
 const tareasPorVencimiento = computed(() => {
   const items = tareasParaTabla.value
@@ -192,7 +299,72 @@ async function exportarExcel() {
   }
 }
 
-onMounted(load)
+async function actualizarTareas() {
+  try {
+    const res = await getTareas({ proyecto: proyectoId.value, _ts: Date.now() })
+    tareas.value = parseListResponse(res.data)
+    toast.success('Tareas actualizadas.')
+  } catch {
+    toast.error('No se pudieron actualizar las tareas.')
+  }
+}
+
+async function actualizarTareasSilencioso() {
+  try {
+    const res = await getTareas({ proyecto: proyectoId.value, _ts: Date.now() })
+    tareas.value = parseListResponse(res.data)
+  } catch {
+    // Sin ruido visual: es auto-refresh.
+  }
+}
+
+function recargarAlVolver() {
+  void load()
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    void actualizarTareasSilencioso()
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh()
+  autoRefreshTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      void actualizarTareasSilencioso()
+    }
+  }, AUTO_REFRESH_MS)
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
+onMounted(() => {
+  void load()
+  window.addEventListener('focus', recargarAlVolver)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  startAutoRefresh()
+})
+onActivated(() => {
+  void load()
+  startAutoRefresh()
+})
+onDeactivated(() => {
+  stopAutoRefresh()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', recargarAlVolver)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  stopAutoRefresh()
+})
+watch(proyectoId, () => {
+  void load()
+})
 </script>
 
 <template>
@@ -200,6 +372,9 @@ onMounted(load)
     <div class="header-row">
       <h1>{{ proyecto.nombre }}</h1>
       <div class="header-actions">
+        <button type="button" class="btn-actualizar" @click="actualizarTareas">
+          Actualizar tareas
+        </button>
         <button type="button" class="btn-exportar" @click="exportarExcel">
           <IconDownload class="btn-icon" />
           Exportar a Excel
@@ -299,6 +474,11 @@ onMounted(load)
 
     <section class="section">
       <h2>Tareas</h2>
+      <div class="orden-actions" v-if="!isVisualizador">
+        <button type="button" class="btn-orden" @click="modoOrden = !modoOrden">
+          {{ modoOrden ? 'Finalizar ordenamiento' : 'Acomodar orden' }}
+        </button>
+      </div>
       <div class="vencimiento-leyenda">
         <span class="leyenda-item vencida">Vencida</span>
         <span class="leyenda-item proxima">Próxima a vencer (7 días)</span>
@@ -315,10 +495,20 @@ onMounted(load)
               <th>Estado</th>
               <th>Avance</th>
               <th>Fecha de vencimiento</th>
+              <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in tareasPorVencimiento.vencidas" :key="(item.tarea.id as number)" :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '']">
+            <tr
+              v-for="item in tareasPorVencimiento.vencidas"
+              :key="(item.tarea.id as number)"
+              :draggable="modoOrden && !isVisualizador"
+              @dragstart="onDragStart(item.tarea)"
+              @dragend="onDragEnd"
+              @dragover.prevent="onDragOver(item.tarea)"
+              @drop.prevent="onDrop(item.tarea)"
+              :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '', modoOrden && dragOverTaskId === Number(item.tarea.id) && draggedTaskId !== Number(item.tarea.id) ? 'drag-over-row' : '']"
+            >
               <td class="col-orden">{{ item.orden }}</td>
               <td :class="{ 'cell-indent': item.esSubtarea }">
                 <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
@@ -331,6 +521,9 @@ onMounted(load)
                   {{ item.tarea.fecha_vencimiento }}
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
+              </td>
+              <td v-if="modoOrden && !isVisualizador" class="orden-col">
+                <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
               </td>
             </tr>
           </tbody>
@@ -347,10 +540,20 @@ onMounted(load)
               <th>Estado</th>
               <th>Avance</th>
               <th>Fecha de vencimiento</th>
+              <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in tareasPorVencimiento.proximas" :key="(item.tarea.id as number)" :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '']">
+            <tr
+              v-for="item in tareasPorVencimiento.proximas"
+              :key="(item.tarea.id as number)"
+              :draggable="modoOrden && !isVisualizador"
+              @dragstart="onDragStart(item.tarea)"
+              @dragend="onDragEnd"
+              @dragover.prevent="onDragOver(item.tarea)"
+              @drop.prevent="onDrop(item.tarea)"
+              :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '', modoOrden && dragOverTaskId === Number(item.tarea.id) && draggedTaskId !== Number(item.tarea.id) ? 'drag-over-row' : '']"
+            >
               <td class="col-orden">{{ item.orden }}</td>
               <td :class="{ 'cell-indent': item.esSubtarea }">
                 <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
@@ -363,6 +566,9 @@ onMounted(load)
                   {{ item.tarea.fecha_vencimiento }}
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
+              </td>
+              <td v-if="modoOrden && !isVisualizador" class="orden-col">
+                <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
               </td>
             </tr>
           </tbody>
@@ -379,10 +585,20 @@ onMounted(load)
               <th>Estado</th>
               <th>Avance</th>
               <th>Fecha de vencimiento</th>
+              <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in tareasPorVencimiento.dentro" :key="(item.tarea.id as number)" :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '']">
+            <tr
+              v-for="item in tareasPorVencimiento.dentro"
+              :key="(item.tarea.id as number)"
+              :draggable="modoOrden && !isVisualizador"
+              @dragstart="onDragStart(item.tarea)"
+              @dragend="onDragEnd"
+              @dragover.prevent="onDragOver(item.tarea)"
+              @drop.prevent="onDrop(item.tarea)"
+              :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '', modoOrden && dragOverTaskId === Number(item.tarea.id) && draggedTaskId !== Number(item.tarea.id) ? 'drag-over-row' : '']"
+            >
               <td class="col-orden">{{ item.orden }}</td>
               <td :class="{ 'cell-indent': item.esSubtarea }">
                 <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
@@ -395,6 +611,9 @@ onMounted(load)
                   {{ item.tarea.fecha_vencimiento }}
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
+              </td>
+              <td v-if="modoOrden && !isVisualizador" class="orden-col">
+                <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
               </td>
             </tr>
           </tbody>
@@ -503,6 +722,49 @@ onMounted(load)
 .tareas-proximas .grupo-titulo { color: #a16207; }
 .tareas-dentro .grupo-titulo { color: #15803d; }
 .col-orden { width: 4rem; text-align: center; font-weight: 600; }
+.orden-actions { margin: 0.5rem 0; }
+.btn-orden {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.8rem;
+  background: #1d4ed8;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-orden:hover { background: #1e40af; }
+.orden-col { white-space: nowrap; }
+.btn-mini {
+  border: none;
+  background: #e2e8f0;
+  color: #1f2937;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  margin-right: 0.25rem;
+  cursor: pointer;
+}
+.btn-mini:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  background: #e2e8f0;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #334155;
+  cursor: grab;
+  user-select: none;
+}
+.drag-over-row {
+  outline: 2px dashed #1d4ed8;
+  outline-offset: -2px;
+}
 
 .header-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
 .btn-exportar {
@@ -519,6 +781,19 @@ onMounted(load)
   text-decoration: none;
 }
 .btn-exportar:hover { background: #0284c7; }
+.btn-actualizar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
+  background: #475569;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.btn-actualizar:hover { background: #334155; }
 .btn-icon { width: 1rem; height: 1rem; }
 
 .graficos-section { margin-top: 2rem; }
