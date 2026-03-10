@@ -45,6 +45,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password', None)
         if password:
             validated_data['password'] = make_password(password)
+            validated_data['token_version'] = (instance.token_version or 1) + 1
         return super().update(instance, validated_data)
 
     def validate(self, data):

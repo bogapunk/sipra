@@ -20,6 +20,7 @@ class Usuario(models.Model):
     secretaria = models.ForeignKey(
         'secretarias.Secretaria', on_delete=models.PROTECT, null=True, blank=True, related_name='usuarios'
     )
+    token_version = models.PositiveIntegerField(default=1)
     estado = models.BooleanField(default=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
 

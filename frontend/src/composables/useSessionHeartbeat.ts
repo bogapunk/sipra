@@ -16,6 +16,11 @@ function getOrCreateSessionKey(): string {
   return key
 }
 
+function buildApiUrl(path: string): string {
+  const baseUrl = ((import.meta.env.VITE_API_BASE_URL as string) || '/api').replace(/\/+$/, '')
+  return `${baseUrl}/${path.replace(/^\/+/, '')}`
+}
+
 async function sendHeartbeat() {
   const sessionKey = getOrCreateSessionKey()
   try {
@@ -37,6 +42,15 @@ async function endSession() {
     }
     sessionStorage.removeItem(SESSION_KEY)
   }
+}
+
+function endSessionWithBeacon() {
+  const sessionKey = sessionStorage.getItem(SESSION_KEY)
+  if (!sessionKey || !navigator.sendBeacon) return
+  const data = new FormData()
+  data.append('session_key', sessionKey)
+  navigator.sendBeacon(buildApiUrl('backup-restore/session/end/'), data)
+  sessionStorage.removeItem(SESSION_KEY)
 }
 
 export function useSessionHeartbeat() {
@@ -80,10 +94,14 @@ export function useSessionHeartbeat() {
 
   onMounted(() => {
     if (user.value?.id) startHeartbeat()
+    window.addEventListener('pagehide', endSessionWithBeacon)
+    window.addEventListener('beforeunload', endSessionWithBeacon)
   })
 
   onUnmounted(() => {
     stopHeartbeat()
+    window.removeEventListener('pagehide', endSessionWithBeacon)
+    window.removeEventListener('beforeunload', endSessionWithBeacon)
   })
 
   return {

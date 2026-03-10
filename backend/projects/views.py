@@ -1,4 +1,5 @@
 from datetime import timedelta
+from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
@@ -14,16 +15,63 @@ from .serializers import (
     EtapaSerializer, ComentarioProyectoSerializer, AdjuntoProyectoSerializer,
     ComentarioAuditLogSerializer, AdjuntoAuditLogSerializer,
 )
+from users.access import (
+    ROL_ADMIN,
+    ROL_CARGA,
+    ROL_VISUALIZACION,
+    ensure_project_assignment_allowed,
+    ensure_read_only_for_roles,
+    filter_projects_for_user,
+    require_roles,
+)
+
+
+def _ensure_catalog_access(request):
+    ensure_read_only_for_roles(
+        request.user,
+        request,
+        read_roles=(ROL_VISUALIZACION,),
+        write_roles=(ROL_ADMIN,),
+        message='Solo el Administrador puede modificar catálogos de planificación.',
+    )
+
+
+def _ensure_project_access(request):
+    ensure_read_only_for_roles(
+        request.user,
+        request,
+        read_roles=(ROL_VISUALIZACION, ROL_CARGA),
+        write_roles=(ROL_ADMIN, ROL_CARGA),
+        message='No tiene permisos para gestionar proyectos.',
+    )
+
+
+def _ensure_project_collaboration_access(request):
+    ensure_read_only_for_roles(
+        request.user,
+        request,
+        read_roles=(ROL_VISUALIZACION, ROL_CARGA),
+        write_roles=(ROL_ADMIN, ROL_CARGA, ROL_VISUALIZACION),
+        message='No tiene permisos para gestionar comentarios o adjuntos del proyecto.',
+    )
 
 
 class EjeViewSet(viewsets.ModelViewSet):
     queryset = Eje.objects.all()
     serializer_class = EjeSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_catalog_access(request)
+
 
 class PlanViewSet(viewsets.ModelViewSet):
     queryset = Plan.objects.select_related('eje').all()
     serializer_class = PlanSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_catalog_access(request)
 
     def get_queryset(self):
         qs = Plan.objects.select_related('eje').all()
@@ -37,6 +85,10 @@ class ProgramaViewSet(viewsets.ModelViewSet):
     queryset = Programa.objects.select_related('plan').all()
     serializer_class = ProgramaSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_catalog_access(request)
+
     def get_queryset(self):
         qs = Programa.objects.select_related('plan').all()
         plan = self.request.query_params.get('plan')
@@ -48,6 +100,10 @@ class ProgramaViewSet(viewsets.ModelViewSet):
 class ObjetivoEstrategicoViewSet(viewsets.ModelViewSet):
     queryset = ObjetivoEstrategico.objects.select_related('programa').all()
     serializer_class = ObjetivoEstrategicoSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_catalog_access(request)
 
     def get_queryset(self):
         qs = ObjetivoEstrategico.objects.select_related('programa').all()
@@ -61,6 +117,10 @@ class IndicadorViewSet(viewsets.ModelViewSet):
     queryset = Indicador.objects.select_related('proyecto').all()
     serializer_class = IndicadorSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_catalog_access(request)
+
     def get_queryset(self):
         qs = Indicador.objects.select_related('proyecto').all()
         proyecto = self.request.query_params.get('proyecto')
@@ -70,8 +130,16 @@ class IndicadorViewSet(viewsets.ModelViewSet):
 
 
 class ProyectoViewSet(viewsets.ModelViewSet):
-    queryset = Proyecto.objects.select_related('usuario_responsable', 'area', 'secretaria', 'creado_por').order_by('id')
+    queryset = Proyecto.objects.select_related(
+        'usuario_responsable', 'area', 'secretaria', 'creado_por'
+    ).prefetch_related(
+        Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario'))
+    ).order_by('id')
     serializer_class = ProyectoSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_project_access(request)
 
     def get_object(self):
         """Usa queryset sin filtros de listado para retrieve/update/destroy (evita 'No Proyecto matches')."""
@@ -79,9 +147,7 @@ class ProyectoViewSet(viewsets.ModelViewSet):
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = self.kwargs[lookup_url_kwarg]
         filter_kwargs = {self.lookup_field: lookup_value}
-        if self.action in ('retrieve', 'update', 'partial_update', 'destroy'):
-            return get_object_or_404(Proyecto.objects.all(), **filter_kwargs)
-        return super().get_object()
+        return get_object_or_404(self.get_queryset(), **filter_kwargs)
 
     def perform_destroy(self, instance):
         """Elimina en orden para evitar IntegrityError con Tarea->Etapa->Proyecto."""
@@ -105,50 +171,123 @@ class ProyectoViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Proyecto.objects.select_related(
             'usuario_responsable', 'area', 'secretaria', 'creado_por'
-        ).prefetch_related('equipo', 'proyectoarea_set').order_by('id')
+        ).prefetch_related(
+            Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario')),
+            'proyectoarea_set__area',
+        ).order_by('id')
         secretaria_id = self.request.query_params.get('secretaria')
         area_id = self.request.query_params.get('area')
         if secretaria_id:
             qs = qs.filter(secretaria_id=secretaria_id)
         if area_id:
             qs = qs.filter(area_id=area_id)
-        return qs
+        return filter_projects_for_user(qs, self.request.user)
+
+    def perform_create(self, serializer):
+        data = serializer.validated_data
+        ensure_project_assignment_allowed(
+            self.request.user,
+            area_id=getattr(data.get('area'), 'id', None),
+            secretaria_id=getattr(data.get('secretaria'), 'id', None),
+            usuario_responsable_id=getattr(data.get('usuario_responsable'), 'id', None),
+        )
+        serializer.save(creado_por=self.request.user)
+
+    def perform_update(self, serializer):
+        data = serializer.validated_data
+        ensure_project_assignment_allowed(
+            self.request.user,
+            area_id=getattr(data.get('area', serializer.instance.area), 'id', None),
+            secretaria_id=getattr(data.get('secretaria', serializer.instance.secretaria), 'id', None),
+            usuario_responsable_id=getattr(
+                data.get('usuario_responsable', serializer.instance.usuario_responsable), 'id', None
+            ),
+        )
+        serializer.save(creado_por=serializer.instance.creado_por)
 
 
 class ProyectoEquipoViewSet(viewsets.ModelViewSet):
     queryset = ProyectoEquipo.objects.select_related('proyecto', 'usuario')
     serializer_class = ProyectoEquipoSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_project_access(request)
+
     def get_queryset(self):
         qs = ProyectoEquipo.objects.select_related('proyecto', 'usuario')
         proyecto = self.request.query_params.get('proyecto')
         if proyecto:
             qs = qs.filter(proyecto_id=proyecto)
-        return qs
+        return qs.filter(proyecto_id__in=filter_projects_for_user(Proyecto.objects.all(), self.request.user).values('id'))
+
+    def perform_create(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto')
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta asignar equipo.')
+        serializer.save()
+
+    def perform_update(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto', serializer.instance.proyecto)
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta asignar equipo.')
+        serializer.save()
 
 
 class ProyectoAreaViewSet(viewsets.ModelViewSet):
     queryset = ProyectoArea.objects.select_related('proyecto', 'area')
     serializer_class = ProyectoAreaSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_project_access(request)
+
     def get_queryset(self):
         qs = ProyectoArea.objects.select_related('proyecto', 'area')
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             qs = qs.filter(proyecto_id=proyecto)
-        return qs
+        return qs.filter(proyecto_id__in=filter_projects_for_user(Proyecto.objects.all(), self.request.user).values('id'))
+
+    def perform_create(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto')
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta asignar un área.')
+        serializer.save()
+
+    def perform_update(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto', serializer.instance.proyecto)
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta asignar un área.')
+        serializer.save()
 
 
 class EtapaViewSet(viewsets.ModelViewSet):
     queryset = Etapa.objects.select_related('proyecto')
     serializer_class = EtapaSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_project_access(request)
+
     def get_queryset(self):
         qs = Etapa.objects.select_related('proyecto')
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             qs = qs.filter(proyecto_id=proyecto)
-        return qs
+        return qs.filter(proyecto_id__in=filter_projects_for_user(Proyecto.objects.all(), self.request.user).values('id'))
+
+    def perform_create(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto')
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta crear una etapa.')
+        serializer.save()
+
+    def perform_update(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto', serializer.instance.proyecto)
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta editar una etapa.')
+        serializer.save()
 
 
 MINUTOS_EDICION_USUARIO = 15
@@ -158,12 +297,16 @@ class ComentarioProyectoViewSet(viewsets.ModelViewSet):
     queryset = ComentarioProyecto.objects.select_related('proyecto', 'usuario', 'editado_por')
     serializer_class = ComentarioProyectoSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_project_collaboration_access(request)
+
     def get_queryset(self):
         qs = ComentarioProyecto.objects.select_related('proyecto', 'usuario', 'editado_por')
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             qs = qs.filter(proyecto_id=proyecto)
-        return qs
+        return qs.filter(proyecto_id__in=filter_projects_for_user(Proyecto.objects.all(), self.request.user).values('id'))
 
     def _es_admin(self, user):
         return getattr(user, 'rol', None) and getattr(user.rol, 'nombre', None) == 'Administrador'
@@ -178,6 +321,9 @@ class ComentarioProyectoViewSet(viewsets.ModelViewSet):
         return timezone.now() <= limite
 
     def perform_create(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto')
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta comentar.')
         serializer.save(usuario=self.request.user)
 
     def perform_update(self, serializer):
@@ -227,6 +373,11 @@ class ComentarioAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ComentarioAuditLogSerializer
 
     def get_queryset(self):
+        require_roles(
+            self.request.user,
+            ROL_ADMIN,
+            message='Solo el Administrador puede consultar el log de auditoría de comentarios.'
+        )
         qs = ComentarioAuditLog.objects.select_related('usuario').order_by('-fecha')
         proyecto = self.request.query_params.get("proyecto")
         tarea = self.request.query_params.get("tarea")
@@ -267,6 +418,11 @@ class AdjuntoAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AdjuntoAuditLogSerializer
 
     def get_queryset(self):
+        require_roles(
+            self.request.user,
+            ROL_ADMIN,
+            message='Solo el Administrador puede consultar el log de auditoría de adjuntos.'
+        )
         qs = AdjuntoAuditLog.objects.select_related('usuario').order_by('-fecha')
         proyecto = self.request.query_params.get("proyecto")
         tarea = self.request.query_params.get("tarea")
@@ -305,12 +461,16 @@ class AdjuntoProyectoViewSet(viewsets.ModelViewSet):
     queryset = AdjuntoProyecto.objects.select_related('proyecto', 'subido_por').order_by('-fecha')
     serializer_class = AdjuntoProyectoSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_project_collaboration_access(request)
+
     def get_queryset(self):
         qs = AdjuntoProyecto.objects.select_related('proyecto', 'subido_por').order_by('-fecha')
         proyecto = self.request.query_params.get("proyecto")
         if proyecto:
             qs = qs.filter(proyecto_id=proyecto)
-        return qs
+        return qs.filter(proyecto_id__in=filter_projects_for_user(Proyecto.objects.all(), self.request.user).values('id'))
 
     def _es_admin(self, user):
         return getattr(user, 'rol', None) and getattr(user.rol, 'nombre', None) == 'Administrador'
@@ -320,6 +480,9 @@ class AdjuntoProyectoViewSet(viewsets.ModelViewSet):
         return self._es_admin(user) or adjunto.subido_por_id == user.id
 
     def perform_create(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto')
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta subir un adjunto.')
         serializer.save(subido_por=self.request.user)
 
     def perform_update(self, serializer):

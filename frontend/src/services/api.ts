@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useAuth } from '@/composables/useAuth'
 
 export const api = axios.create({
   baseURL: (import.meta.env.VITE_API_BASE_URL as string) || '/api',
@@ -83,8 +84,8 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 && !error.config.url?.includes('/auth/login')) {
-      localStorage.removeItem('sistema_proyectos_token')
-      localStorage.removeItem('sistema_proyectos_user')
+      const { logout } = useAuth()
+      logout()
       if (window.location.pathname !== '/login') {
         window.location.href = '/login'
       }

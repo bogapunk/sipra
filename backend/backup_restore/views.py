@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 
 from .models import SystemRestoreLog, ActiveSession
 from .services import (
@@ -86,6 +87,7 @@ class SessionHeartbeatView(APIView):
 
 class SessionEndView(APIView):
     """Finaliza la sesión al cerrar o hacer logout."""
+    permission_classes = [AllowAny]
 
     def post(self, request):
         session_key = request.data.get('session_key') or request.META.get('HTTP_X_SESSION_KEY', '')

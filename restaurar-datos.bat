@@ -10,6 +10,12 @@ echo.
 
 cd /d "%~dp0backend"
 
+set "POSTGRES_DB_HOST=localhost"
+set "POSTGRES_DB_PORT=5432"
+set "POSTGRES_DB_NAME=sipra"
+set "POSTGRES_DB_USER=postgres"
+set "POSTGRES_DB_PASSWORD=30153846"
+
 python manage.py restaurar_sistema_completo
 
 echo.
@@ -17,7 +23,7 @@ echo ===========================================
 echo   Proceso finalizado
 echo ========================================
 echo.
-echo Ejecute iniciar-sistema.bat para iniciar el sistema
+echo Ejecute ejecutar-sistema-completo.bat para iniciar el sistema
 echo o reinicie el backend si ya está en ejecución.
 echo.
 pause

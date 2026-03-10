@@ -93,6 +93,14 @@ onMounted(async () => {
     }
   } catch (e: unknown) {
     const err = e as { response?: { data?: unknown; status?: number }; message?: string }
+    if (err.response?.status === 401) {
+      errorProyectos.value = 'Sesión expirada o token inválido. Redirigiendo al login...'
+      proyectos.value = []
+      proyectosCarga.value = []
+      tareasParticularesCarga.value = []
+      data.value = null
+      return
+    }
     const msg = err.response?.data && typeof err.response.data === 'object' && 'detail' in (err.response.data as object)
       ? String((err.response.data as { detail: unknown }).detail)
       : err.response?.data && typeof err.response.data === 'string'

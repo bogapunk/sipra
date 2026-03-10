@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.db.models import Avg
+from .upload_validators import validate_uploaded_file, validate_original_filename
 from .models import (
     Eje, Plan, Programa, ObjetivoEstrategico,
     Proyecto, ProyectoArea, ProyectoEquipo, Etapa, ComentarioProyecto, AdjuntoProyecto, Indicador,
@@ -78,6 +79,18 @@ class ProyectoSerializer(serializers.ModelSerializer):
                 ProyectoEquipo.objects.get_or_create(proyecto=proyecto, usuario_id=uid)
         return proyecto
 
+    def validate(self, data):
+        area = data.get('area')
+        secretaria = data.get('secretaria')
+        if self.instance:
+            area = area if 'area' in data else self.instance.area
+            secretaria = secretaria if 'secretaria' in data else self.instance.secretaria
+        if area and secretaria:
+            raise serializers.ValidationError(
+                'Seleccione solo un Área o una Secretaría, no ambos.'
+            )
+        return data
+
     class Meta:
         model = Proyecto
         fields = [
@@ -88,10 +101,12 @@ class ProyectoSerializer(serializers.ModelSerializer):
             'area', 'area_nombre', 'secretaria',
             'equipo', 'equipo_nombres',
         ]
+        read_only_fields = ['creado_por', 'fecha_creacion']
 
 
 class ProyectoDashboardSerializer(serializers.ModelSerializer):
-    """Incluye avance calculado desde tareas, fecha de última actualización, área y usuario que actualizó."""
+    """Incluye avance calculado desde tareas, fecha de última actualización, área y usuario que actualizó.
+    Usa context['avances'] y context['ultimos_historiales'] si se pasan para evitar N+1."""
     porcentaje_avance = serializers.SerializerMethodField()
     fecha_ultima_actualizacion = serializers.SerializerMethodField()
     area_ultima_actualizacion = serializers.SerializerMethodField()
@@ -109,19 +124,28 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
                   'usuario_responsable', 'secretaria', 'secretaria_nombre', 'area', 'area_nombre',
                   'areas_asignadas', 'equipo_nombres', 'creado_por', 'fecha_inicio', 'fecha_fin_estimada']
 
-    def get_porcentaje_avance(self, obj):
+    def _get_avance(self, obj):
+        avances = self.context.get('avances')
+        if avances is not None:
+            return round(float(avances.get(obj.id) or 0), 2)
         from tasks.models import Tarea
         result = Tarea.objects.filter(proyecto=obj).aggregate(avg=Avg('porcentaje_avance'))
         return round(float(result['avg'] or 0), 2)
 
+    def get_porcentaje_avance(self, obj):
+        return self._get_avance(obj)
+
     def _get_ultimo_historial(self, obj):
+        ultimos = self.context.get('ultimos_historiales')
+        if ultimos is not None:
+            return ultimos.get(obj.id)
         if not hasattr(obj, '_cache_ultimo_historial'):
             from tasks.models import Tarea, HistorialTarea
             tarea_ids = Tarea.objects.filter(proyecto=obj).values_list('id', flat=True)
             obj._cache_ultimo_historial = HistorialTarea.objects.filter(
                 tarea_id__in=tarea_ids
             ).select_related('tarea__area', 'usuario').order_by('-fecha').first()
-        return obj._cache_ultimo_historial
+        return getattr(obj, '_cache_ultimo_historial', None)
 
     def get_fecha_ultima_actualizacion(self, obj):
         last = self._get_ultimo_historial(obj)
@@ -133,6 +157,8 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
         last = self._get_ultimo_historial(obj)
         if last and last.tarea and last.tarea.area:
             return last.tarea.area.nombre
+        if obj.area_id and obj.area:
+            return obj.area.nombre
         from tasks.models import Tarea
         primera_tarea = Tarea.objects.filter(proyecto=obj).select_related('area').first()
         if primera_tarea and primera_tarea.area:
@@ -230,6 +256,12 @@ class AdjuntoProyectoSerializer(serializers.ModelSerializer):
 
     def get_url(self, obj):
         return obj.archivo.url if obj.archivo else None
+
+    def validate_archivo(self, value):
+        return validate_uploaded_file(value)
+
+    def validate_nombre_original(self, value):
+        return validate_original_filename(value)
 
     class Meta:
         model = AdjuntoProyecto

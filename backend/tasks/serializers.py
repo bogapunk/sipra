@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Tarea, HistorialTarea, ComentarioTarea, AdjuntoTarea
+from projects.upload_validators import validate_uploaded_file, validate_original_filename
 
 
 class TareaSerializer(serializers.ModelSerializer):
@@ -111,6 +112,12 @@ class AdjuntoTareaSerializer(serializers.ModelSerializer):
 
     def get_url(self, obj):
         return obj.archivo.url if obj.archivo else None
+
+    def validate_archivo(self, value):
+        return validate_uploaded_file(value)
+
+    def validate_nombre_original(self, value):
+        return validate_original_filename(value)
 
     class Meta:
         model = AdjuntoTarea

@@ -3,16 +3,25 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import Usuario, Rol
 from .serializers import UsuarioSerializer, RolSerializer
+from .access import require_roles, ROL_ADMIN
 
 
 class RolViewSet(viewsets.ModelViewSet):
     queryset = Rol.objects.all()
     serializer_class = RolSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        require_roles(request.user, ROL_ADMIN, message='Solo el Administrador puede gestionar roles.')
+
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()  # Base para el router; get_queryset filtra
     serializer_class = UsuarioSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        require_roles(request.user, ROL_ADMIN, message='Solo el Administrador puede gestionar usuarios.')
 
     def get_queryset(self):
         """Por defecto solo usuarios activos. Incluir inactivos con ?incluir_inactivos=1"""
@@ -33,6 +42,7 @@ class UsuariosParaSelectorView(APIView):
     """Lista de usuarios (id, nombre, apellido, nombre_completo) para selectores.
     Parámetros opcionales: area, secretaria - filtra usuarios por área o secretaría."""
     def get(self, request):
+        require_roles(request.user, ROL_ADMIN, message='Solo el Administrador puede consultar el selector de usuarios.')
         usuarios = Usuario.objects.filter(estado=True).order_by('nombre', 'apellido')
         area_id = request.query_params.get('area')
         secretaria_id = request.query_params.get('secretaria')

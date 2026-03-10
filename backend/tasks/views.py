@@ -6,6 +6,15 @@ from django.db.models import Q, Prefetch, Max
 from .models import Tarea, HistorialTarea, ComentarioTarea, AdjuntoTarea
 from projects.models import AdjuntoAuditLog
 from .serializers import TareaSerializer, HistorialTareaSerializer, ComentarioTareaSerializer, AdjuntoTareaSerializer
+from users.access import (
+    ROL_ADMIN,
+    ROL_CARGA,
+    ROL_VISUALIZACION,
+    ensure_read_only_for_roles,
+    ensure_task_assignment_allowed,
+    filter_projects_for_user,
+    filter_tasks_for_user,
+)
 
 MINUTOS_EDICION_USUARIO = 15
 
@@ -18,7 +27,28 @@ class TareaViewSet(viewsets.ModelViewSet):
     )
     serializer_class = TareaSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        ensure_read_only_for_roles(
+            request.user,
+            request,
+            read_roles=(ROL_VISUALIZACION, ROL_CARGA),
+            write_roles=(ROL_ADMIN, ROL_CARGA),
+            message='No tiene permisos para gestionar tareas.',
+        )
+
     def perform_create(self, serializer):
+        data = serializer.validated_data
+        proyecto = data.get('proyecto')
+        tarea_padre = data.get('tarea_padre')
+        proyecto_base = proyecto or getattr(tarea_padre, 'proyecto', None)
+        ensure_task_assignment_allowed(
+            self.request.user,
+            area_id=getattr(data.get('area'), 'id', None),
+            secretaria_id=getattr(data.get('secretaria'), 'id', None),
+            responsable_id=getattr(data.get('responsable'), 'id', None),
+            proyecto=proyecto_base,
+        )
         instance = serializer.save()
         if instance.tarea_padre_id and not instance.proyecto_id and instance.tarea_padre.proyecto_id:
             instance.proyecto = instance.tarea_padre.proyecto
@@ -34,6 +64,17 @@ class TareaViewSet(viewsets.ModelViewSet):
             instance.save(update_fields=['orden'])
 
     def perform_update(self, serializer):
+        data = serializer.validated_data
+        proyecto = data.get('proyecto', serializer.instance.proyecto)
+        tarea_padre = data.get('tarea_padre', serializer.instance.tarea_padre)
+        proyecto_base = proyecto or getattr(tarea_padre, 'proyecto', None)
+        ensure_task_assignment_allowed(
+            self.request.user,
+            area_id=getattr(data.get('area', serializer.instance.area), 'id', None),
+            secretaria_id=getattr(data.get('secretaria', serializer.instance.secretaria), 'id', None),
+            responsable_id=getattr(data.get('responsable', serializer.instance.responsable), 'id', None),
+            proyecto=proyecto_base,
+        )
         instance = serializer.save()
         if instance.tarea_padre_id and not instance.proyecto_id and instance.tarea_padre.proyecto_id:
             instance.proyecto = instance.tarea_padre.proyecto
@@ -86,31 +127,57 @@ class TareaViewSet(viewsets.ModelViewSet):
             qs = qs.filter(estado=estado)
         if responsable and not usuario:
             qs = qs.filter(responsable_id=responsable)
-        return qs.order_by('tarea_padre_id', 'orden', 'id')
+        return filter_tasks_for_user(qs.order_by('tarea_padre_id', 'orden', 'id'), self.request.user)
 
 
 class HistorialTareaViewSet(viewsets.ModelViewSet):
     queryset = HistorialTarea.objects.select_related('tarea', 'usuario').order_by('-fecha')
     serializer_class = HistorialTareaSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        ensure_read_only_for_roles(
+            request.user,
+            request,
+            read_roles=(ROL_VISUALIZACION, ROL_CARGA),
+            write_roles=(ROL_ADMIN, ROL_CARGA),
+            message='No tiene permisos para gestionar el historial de tareas.',
+        )
+
     def get_queryset(self):
         qs = HistorialTarea.objects.select_related('tarea', 'usuario').order_by('-fecha')
         tarea = self.request.query_params.get("tarea")
         if tarea:
             qs = qs.filter(tarea_id=tarea)
-        return qs
+        return qs.filter(tarea_id__in=filter_tasks_for_user(Tarea.objects.all(), self.request.user).values('id'))
+
+    def perform_create(self, serializer):
+        tarea = serializer.validated_data.get('tarea')
+        if not filter_tasks_for_user(Tarea.objects.filter(id=tarea.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso a la tarea donde intenta registrar un avance.')
+        serializer.save(usuario=self.request.user)
 
 
 class ComentarioTareaViewSet(viewsets.ModelViewSet):
     queryset = ComentarioTarea.objects.select_related('tarea', 'usuario', 'editado_por').order_by('fecha')
     serializer_class = ComentarioTareaSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        ensure_read_only_for_roles(
+            request.user,
+            request,
+            read_roles=(ROL_VISUALIZACION, ROL_CARGA),
+            write_roles=(ROL_ADMIN, ROL_CARGA, ROL_VISUALIZACION),
+            message='No tiene permisos para gestionar comentarios de tareas.',
+        )
+
     def get_queryset(self):
         qs = ComentarioTarea.objects.select_related('tarea', 'usuario', 'editado_por').order_by('fecha')
         tarea = self.request.query_params.get("tarea")
         if tarea:
             qs = qs.filter(tarea_id=tarea)
-        return qs
+        return qs.filter(tarea_id__in=filter_tasks_for_user(Tarea.objects.all(), self.request.user).values('id'))
 
     def _es_admin(self, user):
         return getattr(user, 'rol', None) and getattr(user.rol, 'nombre', None) == 'Administrador'
@@ -125,6 +192,9 @@ class ComentarioTareaViewSet(viewsets.ModelViewSet):
         return timezone.now() <= limite
 
     def perform_create(self, serializer):
+        tarea = serializer.validated_data.get('tarea')
+        if not filter_tasks_for_user(Tarea.objects.filter(id=tarea.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso a la tarea donde intenta comentar.')
         serializer.save(usuario=self.request.user)
 
     def perform_update(self, serializer):
@@ -180,12 +250,22 @@ class AdjuntoTareaViewSet(viewsets.ModelViewSet):
     queryset = AdjuntoTarea.objects.select_related('tarea', 'subido_por').order_by('-fecha')
     serializer_class = AdjuntoTareaSerializer
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        ensure_read_only_for_roles(
+            request.user,
+            request,
+            read_roles=(ROL_VISUALIZACION, ROL_CARGA),
+            write_roles=(ROL_ADMIN, ROL_CARGA, ROL_VISUALIZACION),
+            message='No tiene permisos para gestionar adjuntos de tareas.',
+        )
+
     def get_queryset(self):
         qs = AdjuntoTarea.objects.select_related('tarea', 'subido_por').order_by('-fecha')
         tarea = self.request.query_params.get("tarea")
         if tarea:
             qs = qs.filter(tarea_id=tarea)
-        return qs
+        return qs.filter(tarea_id__in=filter_tasks_for_user(Tarea.objects.all(), self.request.user).values('id'))
 
     def _es_admin(self, user):
         return getattr(user, 'rol', None) and getattr(user.rol, 'nombre', None) == 'Administrador'
@@ -195,6 +275,9 @@ class AdjuntoTareaViewSet(viewsets.ModelViewSet):
         return self._es_admin(user) or adjunto.subido_por_id == user.id
 
     def perform_create(self, serializer):
+        tarea = serializer.validated_data.get('tarea')
+        if not filter_tasks_for_user(Tarea.objects.filter(id=tarea.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso a la tarea donde intenta subir un adjunto.')
         serializer.save(subido_por=self.request.user)
 
     def perform_update(self, serializer):

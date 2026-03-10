@@ -1,5 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from django.db.models import Avg, Prefetch, Q
 from django.utils import timezone
 from collections import defaultdict
@@ -7,10 +8,44 @@ from tasks.models import Tarea, HistorialTarea
 from projects.models import Proyecto, ProyectoArea, Eje, Plan, Programa, ObjetivoEstrategico, Indicador
 
 
+def _bulk_avances_historiales(proyecto_ids):
+    """Precalcula avances y últimos historiales para muchos proyectos (evita N+1)."""
+    if not proyecto_ids:
+        return {}, {}
+    from tasks.models import Tarea, HistorialTarea
+    avances = dict(
+        Tarea.objects.filter(proyecto_id__in=proyecto_ids)
+        .values('proyecto_id')
+        .annotate(avg=Avg('porcentaje_avance'))
+        .values_list('proyecto_id', 'avg')
+    )
+    historiales = HistorialTarea.objects.filter(
+        tarea__proyecto_id__in=proyecto_ids
+    ).select_related('tarea__area', 'usuario').order_by('-fecha')
+    ultimos = {}
+    for h in historiales:
+        pid = h.tarea.proyecto_id
+        if pid not in ultimos:
+            ultimos[pid] = h
+    return avances, ultimos
+from users.access import (
+    ROL_ADMIN,
+    ROL_VISUALIZACION,
+    filter_projects_for_user,
+    require_roles,
+)
+
+
 class ProyectosPorUsuarioView(APIView):
     """Proyectos del usuario: a_cargo (responsable) y participacion (área/secretaría/equipo).
     Retorna { proyectos_a_cargo: [...], proyectos_participacion: [...] }"""
     def get(self, request, usuario_id):
+        if request.user.id != usuario_id:
+            require_roles(
+                request.user,
+                ROL_ADMIN,
+                message='Solo el Administrador puede consultar proyectos de otros usuarios.'
+            )
         from users.models import Usuario
         from projects.models import ProyectoArea, ProyectoEquipo
         usuario = Usuario.objects.filter(id=usuario_id).first()
@@ -67,8 +102,11 @@ class ProyectosPorUsuarioView(APIView):
 
         from projects.serializers import ProyectoDashboardSerializer
         from tasks.serializers import TareaSerializer
-        a_cargo_data = ProyectoDashboardSerializer(proyectos_a_cargo, many=True).data
-        participacion_data = ProyectoDashboardSerializer(proyectos_participacion, many=True).data
+        todos_ids = list(ids_a_cargo | ids_participacion)
+        avances, ultimos_historiales = _bulk_avances_historiales(todos_ids)
+        ctx = {'avances': avances, 'ultimos_historiales': ultimos_historiales}
+        a_cargo_data = ProyectoDashboardSerializer(proyectos_a_cargo, many=True, context=ctx).data
+        participacion_data = ProyectoDashboardSerializer(proyectos_participacion, many=True, context=ctx).data
         # Marcar cada proyecto con es_responsable para el frontend
         for p in a_cargo_data:
             p['es_responsable'] = True
@@ -99,6 +137,12 @@ class AlertasVencimientoView(APIView):
     Tareas: por fecha_vencimiento. Proyectos: por fecha_fin_estimada.
     Excluye tareas Finalizadas y proyectos Finalizados."""
     def get(self, request):
+        require_roles(
+            request.user,
+            ROL_ADMIN,
+            ROL_VISUALIZACION,
+            message='Solo Administrador o Visualización pueden consultar alertas de vencimiento.'
+        )
         from tasks.serializers import TareaSerializer
         from datetime import timedelta
 
@@ -149,6 +193,12 @@ class AlertasVencimientoView(APIView):
 class ProyectosDashboardView(APIView):
     """Lista de proyectos con avance actualizado y fecha última actualización (para Admin/Visualizador)."""
     def get(self, request):
+        require_roles(
+            request.user,
+            ROL_ADMIN,
+            ROL_VISUALIZACION,
+            message='Solo Administrador o Visualización pueden consultar el dashboard general.'
+        )
         from projects.models import ProyectoEquipo
         proyectos = Proyecto.objects.select_related('creado_por', 'secretaria', 'usuario_responsable', 'area').prefetch_related(
             Prefetch('proyectoarea_set', queryset=ProyectoArea.objects.select_related('area')),
@@ -158,13 +208,16 @@ class ProyectosDashboardView(APIView):
         if secretaria_id:
             proyectos = proyectos.filter(secretaria_id=secretaria_id)
         from projects.serializers import ProyectoDashboardSerializer
-        return Response(ProyectoDashboardSerializer(proyectos, many=True).data)
+        ids = list(proyectos.values_list('id', flat=True))
+        avances, ultimos_historiales = _bulk_avances_historiales(ids)
+        ctx = {'avances': avances, 'ultimos_historiales': ultimos_historiales}
+        return Response(ProyectoDashboardSerializer(proyectos, many=True, context=ctx).data)
 
 
 class EvolucionProyectoView(APIView):
     """Retorna la evolución temporal del avance de un proyecto (serie temporal para gráfica línea)."""
     def get(self, request, proyecto_id):
-        proyecto = Proyecto.objects.filter(id=proyecto_id).first()
+        proyecto = filter_projects_for_user(Proyecto.objects.filter(id=proyecto_id), request.user).first()
         if not proyecto:
             return Response({"error": "Proyecto no encontrado"}, status=404)
 
@@ -198,6 +251,12 @@ class EvolucionProyectoView(APIView):
 class PlanificacionArbolView(APIView):
     """Retorna la estructura jerárquica: Eje → Plan → Programa → Objetivo → Proyecto → Indicador."""
     def get(self, request):
+        require_roles(
+            request.user,
+            ROL_ADMIN,
+            ROL_VISUALIZACION,
+            message='Solo Administrador o Visualización pueden consultar la planificación.'
+        )
         ejes = Eje.objects.prefetch_related(
             'planes__programas__objetivos_estrategicos__proyectos__indicadores'
         ).all()
@@ -221,18 +280,15 @@ class PlanificacionArbolView(APIView):
                         'objetivos': []
                     }
                     for obj in prog.objetivos_estrategicos.all():
-                        obj_data = {
-                            'id': obj.id,
-                            'descripcion': obj.descripcion,
-                            'proyectos': list(
-                                obj.proyectos.values('id', 'nombre', 'estado', 'porcentaje_avance')
-                            )
-                        }
-                        for p in obj_data['proyectos']:
-                            indicadores = list(
-                                Indicador.objects.filter(proyecto_id=p['id']).values('id', 'descripcion', 'unidad_medida', 'frecuencia')
-                            )
-                            p['indicadores'] = indicadores
+                        proyectos_data = []
+                        for p in obj.proyectos.all():
+                            proy_dict = {'id': p.id, 'nombre': p.nombre, 'estado': p.estado, 'porcentaje_avance': p.porcentaje_avance}
+                            proy_dict['indicadores'] = [
+                                {'id': i.id, 'descripcion': i.descripcion, 'unidad_medida': i.unidad_medida, 'frecuencia': i.frecuencia}
+                                for i in p.indicadores.all()
+                            ]
+                            proyectos_data.append(proy_dict)
+                        obj_data = {'id': obj.id, 'descripcion': obj.descripcion, 'proyectos': proyectos_data}
                         prog_data['objetivos'].append(obj_data)
                     plan_data['programas'].append(prog_data)
                 eje_data['planes'].append(plan_data)
@@ -244,15 +300,23 @@ class AvancesPorAreaView(APIView):
     """Retorna tareas agrupadas por área o secretaría con avance actual, último incremento y fecha de actualización.
     Query param 'area': filtrar por nombre de área (ej. Presidencia para Visualizador)."""
     def get(self, request):
+        require_roles(
+            request.user,
+            ROL_ADMIN,
+            ROL_VISUALIZACION,
+            message='Solo Administrador o Visualización pueden consultar avances por área.'
+        )
         try:
-            tareas = Tarea.objects.select_related('area', 'secretaria', 'proyecto').prefetch_related('historial').all()
+            tareas = Tarea.objects.select_related('area', 'secretaria', 'proyecto').prefetch_related(
+                Prefetch('historial', queryset=HistorialTarea.objects.order_by('-fecha'))
+            ).all()
             area_filtro = request.query_params.get('area', '').strip()
             if area_filtro:
                 tareas = tareas.filter(area__nombre__iexact=area_filtro)
             resultado = defaultdict(lambda: {'area': '', 'tareas': []})
 
             for t in tareas:
-                hist = list(t.historial.all().order_by('-fecha')[:2])
+                hist = list(t.historial.all())[:2]
                 ultimo_incremento = None
                 fecha_ultima = None
                 if hist:
@@ -285,17 +349,23 @@ class AvancesPorSecretariaView(APIView):
     """Retorna tareas agrupadas por secretaría con avance actual, último incremento y fecha de actualización.
     Solo incluye tareas vinculadas a una secretaría. Query param 'secretaria': filtrar por ID de secretaría."""
     def get(self, request):
+        require_roles(
+            request.user,
+            ROL_ADMIN,
+            ROL_VISUALIZACION,
+            message='Solo Administrador o Visualización pueden consultar avances por secretaría.'
+        )
         try:
-            tareas = Tarea.objects.select_related('secretaria', 'proyecto').prefetch_related('historial').filter(
-                secretaria__isnull=False
-            )
+            tareas = Tarea.objects.select_related('secretaria', 'proyecto').prefetch_related(
+                Prefetch('historial', queryset=HistorialTarea.objects.order_by('-fecha'))
+            ).filter(secretaria__isnull=False)
             secretaria_filtro = request.query_params.get('secretaria', '').strip()
             if secretaria_filtro:
                 tareas = tareas.filter(secretaria_id=secretaria_filtro)
             resultado = defaultdict(lambda: {'secretaria': '', 'tareas': []})
 
             for t in tareas:
-                hist = list(t.historial.all().order_by('-fecha')[:2])
+                hist = list(t.historial.all())[:2]
                 ultimo_incremento = None
                 fecha_ultima = None
                 if hist:
@@ -326,21 +396,42 @@ class AvancesPorSecretariaView(APIView):
 
 class DashboardEjecutivoView(APIView):
     def get(self, request):
-        total_proyectos = Proyecto.objects.count()
-        proyectos_activos = Proyecto.objects.filter(estado="Activo").count()
-        total_tareas = Tarea.objects.count()
-        tareas_finalizadas = Tarea.objects.filter(estado="Finalizada").count()
-        tareas_bloqueadas = Tarea.objects.filter(estado="Bloqueada").count()
-        tareas_particulares = Tarea.objects.filter(proyecto__isnull=True).count()
-        tareas_particulares_finalizadas = Tarea.objects.filter(proyecto__isnull=True, estado="Finalizada").count()
+        require_roles(
+            request.user,
+            ROL_ADMIN,
+            message='Solo el Administrador puede consultar el dashboard ejecutivo.'
+        )
+        from django.db.models import Count, Q
+        # Una sola consulta para proyectos
+        proy_stats = Proyecto.objects.aggregate(
+            total=Count('id'),
+            activos=Count('id', filter=Q(estado='Activo')),
+        )
+        total_proyectos = proy_stats['total'] or 0
+        proyectos_activos = proy_stats['activos'] or 0
 
-        avance_global = 0
-        if total_tareas > 0:
-            avance_global = (tareas_finalizadas / total_tareas) * 100
+        # Una sola consulta para tareas (con proyecto)
+        tarea_stats = Tarea.objects.filter(proyecto__isnull=False).aggregate(
+            total=Count('id'),
+            finalizadas=Count('id', filter=Q(estado='Finalizada')),
+            bloqueadas=Count('id', filter=Q(estado='Bloqueada')),
+        )
+        total_tareas = tarea_stats['total'] or 0
+        tareas_finalizadas = tarea_stats['finalizadas'] or 0
+        tareas_bloqueadas = tarea_stats['bloqueadas'] or 0
 
-        avance_particulares = 0
-        if tareas_particulares > 0:
-            avance_particulares = (tareas_particulares_finalizadas / tareas_particulares) * 100
+        # Una consulta para tareas particulares
+        tp_stats = Tarea.objects.filter(proyecto__isnull=True).aggregate(
+            total=Count('id'),
+            finalizadas=Count('id', filter=Q(estado='Finalizada')),
+        )
+        tareas_particulares = tp_stats['total'] or 0
+        tareas_particulares_finalizadas = tp_stats['finalizadas'] or 0
+        total_tareas += tareas_particulares
+        tareas_finalizadas += tareas_particulares_finalizadas
+
+        avance_global = (tareas_finalizadas / total_tareas * 100) if total_tareas > 0 else 0
+        avance_particulares = (tareas_particulares_finalizadas / tareas_particulares * 100) if tareas_particulares > 0 else 0
 
         data = {
             "total_proyectos": total_proyectos,

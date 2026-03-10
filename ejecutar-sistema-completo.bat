@@ -34,16 +34,19 @@ echo [2/5] Cargando datos base (si faltan)...
 python manage.py crear_datos_iniciales
 python manage.py cargar_secretarias 2>nul
 
-echo [3/5] Verificando usuario lolo@gmail.com en PostgreSQL...
-python manage.py shell -c "from users.models import Usuario; print('Usuarios totales:', Usuario.objects.count()); print('lolo@gmail.com existe:', Usuario.objects.filter(email='lolo@gmail.com').exists())"
+echo [3/5] Verificando usuarios en base de datos...
+python manage.py shell -c "from users.models import Usuario; print('Usuarios activos:', Usuario.objects.filter(estado=True).count())"
 
 echo [4/5] Iniciando backend en puerto 8001...
-start "SIPRA Backend (PostgreSQL)" cmd /k "cd /d ""%~dp0backend"" && set ""DB_PROVIDER=postgres"" && set ""POSTGRES_DB_HOST=localhost"" && set ""POSTGRES_DB_PORT=5432"" && set ""POSTGRES_DB_NAME=sipra"" && set ""POSTGRES_DB_USER=postgres"" && set ""POSTGRES_DB_PASSWORD=30153846"" && python manage.py runserver 8001"
+REM DEBUG=1 habilita CORS para desarrollo local
+start "SIPRA Backend (PostgreSQL)" cmd /k "cd /d ""%~dp0backend"" && set ""DEBUG=1"" && set ""DB_PROVIDER=postgres"" && set ""POSTGRES_DB_HOST=localhost"" && set ""POSTGRES_DB_PORT=5432"" && set ""POSTGRES_DB_NAME=sipra"" && set ""POSTGRES_DB_USER=postgres"" && set ""POSTGRES_DB_PASSWORD=30153846"" && python manage.py runserver 8001"
 
-timeout /t 3 /nobreak >nul
+echo Esperando 5 segundos para que el backend inicie...
+timeout /t 5 /nobreak >nul
 
 echo [5/5] Iniciando frontend en puerto 5173...
-start "SIPRA Frontend" cmd /k "cd /d ""%~dp0frontend"" && set VITE_API_BASE_URL=http://127.0.0.1:8001/api && npm run dev"
+REM Sin VITE_API_BASE_URL: usa proxy de Vite (/api -> localhost:8001) para evitar CORS
+start "SIPRA Frontend" cmd /k "cd /d ""%~dp0frontend"" && npm run dev"
 
 echo.
 echo ==============================================
@@ -53,7 +56,15 @@ echo Backend:  http://127.0.0.1:8001
 echo Frontend: http://127.0.0.1:5173
 echo ==============================================
 echo.
+echo CREDENCIALES DE ACCESO:
+echo   - bogarin1983@gmail.com  /  Sipra2026
+echo   - admin@admin.com       /  admin123
+echo   - admin@sipra.local     /  AdminSipra2026!
+echo.
 echo NOTA: Se abrieron 2 ventanas nuevas (backend/frontend).
 echo No las cierres mientras uses el sistema.
+echo.
+echo Si aparece "Token invalido o expirado": cierre sesion, abra en
+echo ventana de incognito o borre localStorage del sitio, e inicie sesion de nuevo.
 echo.
 pause

@@ -1,26 +1,30 @@
 """
-Restablece la contraseña del usuario Administrador (admin@admin.com).
+Restablece la contraseña del usuario Administrador bootstrap.
 Útil cuando no se puede ingresar al sistema.
 """
+import os
 from django.core.management.base import BaseCommand
 from django.contrib.auth.hashers import make_password
 from users.models import Usuario, Rol
 
 
 class Command(BaseCommand):
-    help = 'Restablece la contraseña del usuario admin@admin.com a admin123'
+    help = 'Restablece la contraseña del usuario administrador bootstrap'
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--password',
             type=str,
-            default='admin123',
-            help='Nueva contraseña (default: admin123)',
+            default='',
+            help='Nueva contraseña. Si no se informa, usa BOOTSTRAP_ADMIN_PASSWORD del entorno.',
         )
 
     def handle(self, *args, **options):
-        email = 'admin@admin.com'
-        nueva_password = options['password']
+        email = (os.environ.get('BOOTSTRAP_ADMIN_EMAIL', 'admin@sipra.local') or 'admin@sipra.local').strip().lower()
+        nueva_password = (options['password'] or os.environ.get('BOOTSTRAP_ADMIN_PASSWORD', '')).strip()
+        if not nueva_password:
+            self.stdout.write(self.style.ERROR('Debe indicar --password o definir BOOTSTRAP_ADMIN_PASSWORD.'))
+            return
 
         usuario = Usuario.objects.filter(email__iexact=email).first()
         if not usuario:
@@ -30,8 +34,8 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.ERROR('No existe el rol Administrador. Ejecute: python manage.py crear_datos_iniciales'))
                 return
             usuario = Usuario.objects.create(
-                nombre='Admin',
-                apellido='Sistema',
+                nombre=os.environ.get('BOOTSTRAP_ADMIN_NOMBRE', 'Administrador').strip() or 'Administrador',
+                apellido=os.environ.get('BOOTSTRAP_ADMIN_APELLIDO', 'SIPRA').strip() or 'SIPRA',
                 email=email,
                 password=make_password(nueva_password),
                 rol=admin_rol,
@@ -41,7 +45,8 @@ class Command(BaseCommand):
         else:
             usuario.password = make_password(nueva_password)
             usuario.estado = True
-            usuario.save(update_fields=['password', 'estado'])
+            usuario.token_version = (usuario.token_version or 1) + 1
+            usuario.save(update_fields=['password', 'estado', 'token_version'])
             self.stdout.write(self.style.SUCCESS(f'Contraseña restablecida para: {email}'))
 
         self.stdout.write(self.style.SUCCESS(f'\nCredenciales de acceso:'))

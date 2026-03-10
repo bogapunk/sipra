@@ -14,15 +14,29 @@ if _env_path.exists():
     except ImportError:
         pass
 
-DEBUG = os.environ.get('DEBUG', '1') in ('1', 'true', 'True', 'yes')
-# En producción, definir SECRET_KEY y ALLOWED_HOSTS en variables de entorno
+def _env_bool(name: str, default: bool = False) -> bool:
+    return (os.environ.get(name, '1' if default else '0') or '').strip().lower() in (
+        '1', 'true', 'yes', 'on'
+    )
+
+
+def _env_list(name: str, default: list[str] | None = None) -> list[str]:
+    raw = (os.environ.get(name, '') or '').strip()
+    if not raw:
+        return list(default or [])
+    return [item.strip() for item in raw.split(',') if item.strip()]
+
+
+DEBUG = _env_bool('DEBUG', False)
+# En producción, definir SECRET_KEY y ALLOWED_HOSTS en variables de entorno.
 SECRET_KEY = os.environ.get('SECRET_KEY') or (
-    'django-insecure-dev-key-change-in-production' if DEBUG else None
+    'django-insecure-local-dev-only' if DEBUG else None
 )
 if not SECRET_KEY:
     raise ValueError('SECRET_KEY es obligatoria en producción. Defínela en variables de entorno.')
-_allowed = os.environ.get('ALLOWED_HOSTS', '').strip()
-ALLOWED_HOSTS = [h.strip() for h in _allowed.split(',') if h.strip()] if _allowed else ['*']
+ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', ['localhost', '127.0.0.1'] if DEBUG else [])
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ValueError('ALLOWED_HOSTS es obligatoria en producción. Defínela en variables de entorno.')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -94,10 +108,10 @@ POSTGRES_DATABASE = {
     'ENGINE': 'django.db.backends.postgresql',
     'NAME': _env_str('POSTGRES_DB_NAME', 'sipra'),
     'USER': _env_str('POSTGRES_DB_USER', 'postgres'),
-    'PASSWORD': _env_str('POSTGRES_DB_PASSWORD', '30153846'),
+    'PASSWORD': _env_str('POSTGRES_DB_PASSWORD', ''),
     'HOST': _env_host('POSTGRES_DB_HOST', 'localhost'),
     'PORT': int(_env_str('POSTGRES_DB_PORT', '5432')),
-    'CONN_MAX_AGE': 600,
+    'CONN_MAX_AGE': int(_env_str('POSTGRES_CONN_MAX_AGE', '600')),
 }
 
 DATABASES = {
@@ -119,13 +133,19 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
 }
 
-# CORS: en desarrollo permite todo; en producción restringir con CORS_ALLOWED_ORIGINS
-CORS_ALLOW_ALL_ORIGINS = DEBUG
+# CORS / CSRF
+CORS_ALLOW_ALL_ORIGINS = _env_bool('CORS_ALLOW_ALL_ORIGINS', DEBUG)
+CORS_ALLOWED_ORIGINS = [] if CORS_ALLOW_ALL_ORIGINS else _env_list('CORS_ALLOWED_ORIGINS')
+CSRF_TRUSTED_ORIGINS = _env_list('CSRF_TRUSTED_ORIGINS')
+
 if not DEBUG:
-    _cors_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '').strip()
-    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins.split(',') if o.strip()] if _cors_origins else []
-else:
-    CORS_ALLOWED_ORIGINS = []  # No usado cuando ALL_ORIGINS=True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = _env_bool('SECURE_SSL_REDIRECT', False)
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
 
 # Backup & Restore
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', BASE_DIR / 'backups'))
@@ -133,3 +153,11 @@ CODE_BACKUP_DIR = Path(os.environ.get('CODE_BACKUP_DIR', BACKUP_DIR / 'code'))
 BACKUP_SCRIPT_PATH = os.environ.get('BACKUP_SCRIPT_PATH', '')  # ej: /opt/scripts/backup.sh
 PG_DUMP_PATH = os.environ.get('PG_DUMP_PATH', '')  # opcional: ruta absoluta a pg_dump
 ACTIVE_SESSION_MINUTES = int(os.environ.get('ACTIVE_SESSION_MINUTES', 5))
+JWT_EXPIRES_HOURS = int(os.environ.get('JWT_EXPIRES_HOURS', '8'))
+JWT_ISSUER = _env_str('JWT_ISSUER', 'sipra')
+JWT_AUDIENCE = _env_str('JWT_AUDIENCE', 'sipra-web')
+MAX_UPLOAD_SIZE_MB = int(os.environ.get('MAX_UPLOAD_SIZE_MB', '10'))
+ALLOWED_UPLOAD_EXTENSIONS = _env_list(
+    'ALLOWED_UPLOAD_EXTENSIONS',
+    ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'txt', 'png', 'jpg', 'jpeg', 'webp']
+)

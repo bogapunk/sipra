@@ -1,6 +1,7 @@
+import os
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import make_password, identify_hasher
 from datetime import timedelta
 from users.models import Rol, Usuario
 from areas.models import Area
@@ -10,6 +11,65 @@ from tasks.models import Tarea, HistorialTarea
 
 class Command(BaseCommand):
     help = 'Crea roles, usuario admin y áreas iniciales'
+
+    def _env(self, name, default=''):
+        return (os.environ.get(name, default) or default).strip()
+
+    def _password_is_hashed(self, value):
+        try:
+            identify_hasher(value)
+            return True
+        except Exception:
+            return False
+
+    def _ensure_bootstrap_user(
+        self,
+        *,
+        email,
+        password,
+        nombre,
+        apellido,
+        rol,
+        area=None,
+        secretaria=None,
+    ):
+        user, created = Usuario.objects.get_or_create(
+            email=email,
+            defaults={
+                'nombre': nombre,
+                'apellido': apellido,
+                'password': make_password(password),
+                'rol': rol,
+                'area': area,
+                'secretaria': secretaria,
+                'estado': True,
+            }
+        )
+        fields_to_update = []
+        if user.nombre != nombre:
+            user.nombre = nombre
+            fields_to_update.append('nombre')
+        if (user.apellido or '') != (apellido or ''):
+            user.apellido = apellido
+            fields_to_update.append('apellido')
+        if user.rol_id != rol.id:
+            user.rol = rol
+            fields_to_update.append('rol')
+        if user.area_id != getattr(area, 'id', None):
+            user.area = area
+            fields_to_update.append('area')
+        if user.secretaria_id != getattr(secretaria, 'id', None):
+            user.secretaria = secretaria
+            fields_to_update.append('secretaria')
+        if not user.estado:
+            user.estado = True
+            fields_to_update.append('estado')
+        if not self._password_is_hashed(user.password):
+            user.password = make_password(password)
+            fields_to_update.append('password')
+        if fields_to_update:
+            user.save(update_fields=fields_to_update)
+        return user, created
 
     def handle(self, *args, **options):
         roles_data = [
@@ -43,36 +103,48 @@ class Command(BaseCommand):
         area_presidencia = areas_objs[0] if areas_objs else None  # Presidencia es primera
         area_desarrollo = areas_objs[1] if len(areas_objs) > 1 else None
 
-        vis_user, vis_created = Usuario.objects.get_or_create(
-            email='visualizador@test.com',
-            defaults={
-                'nombre': 'Usuario',
-                'apellido': 'Visualizador',
-                'password': make_password('vis123'),
-                'rol': vis_rol,
-                'area': area_presidencia,
-                'estado': True,
-            }
+        admin_user, _ = self._ensure_bootstrap_user(
+            email=self._env('BOOTSTRAP_ADMIN_EMAIL', 'admin@sipra.local').lower(),
+            password=self._env('BOOTSTRAP_ADMIN_PASSWORD', 'AdminSipra2026!'),
+            nombre=self._env('BOOTSTRAP_ADMIN_NOMBRE', 'Administrador'),
+            apellido=self._env('BOOTSTRAP_ADMIN_APELLIDO', 'SIPRA'),
+            rol=admin_rol,
         )
-        if not vis_created and area_presidencia:
-            vis_user.area = area_presidencia
-            vis_user.save(update_fields=['area'])
+        vis_user, _ = self._ensure_bootstrap_user(
+            email=self._env('BOOTSTRAP_VISUALIZADOR_EMAIL', 'visualizacion@sipra.local').lower(),
+            password=self._env('BOOTSTRAP_VISUALIZADOR_PASSWORD', 'VisualSipra2026!'),
+            nombre=self._env('BOOTSTRAP_VISUALIZADOR_NOMBRE', 'Consulta'),
+            apellido=self._env('BOOTSTRAP_VISUALIZADOR_APELLIDO', 'General'),
+            rol=vis_rol,
+            area=area_presidencia,
+        )
+        carga_user, _ = self._ensure_bootstrap_user(
+            email=self._env('BOOTSTRAP_CARGA_EMAIL', 'gestion.proyectos@sipra.local').lower(),
+            password=self._env('BOOTSTRAP_CARGA_PASSWORD', 'GestionSipra2026!'),
+            nombre=self._env('BOOTSTRAP_CARGA_NOMBRE', 'Gestion'),
+            apellido=self._env('BOOTSTRAP_CARGA_APELLIDO', 'Proyectos'),
+            rol=carga_rol,
+            area=area_desarrollo,
+        )
 
-        Usuario.objects.get_or_create(
-            email='carga@test.com',
-            defaults={
-                'nombre': 'Usuario',
-                'apellido': 'Carga',
-                'password': make_password('carga123'),
-                'rol': carga_rol,
-                'area': area_desarrollo,
-                'estado': True,
-            }
-        )
+        # Usuario bogarin1983: siempre con contraseña Sipra2026 para desarrollo
+        bogarin = Usuario.objects.filter(email='bogarin1983@gmail.com').first()
+        if bogarin:
+            bogarin.password = make_password('Sipra2026')
+            bogarin.estado = True
+            bogarin.rol = admin_rol
+            bogarin.save(update_fields=['password', 'estado', 'rol'])
+        else:
+            Usuario.objects.create(
+                email='bogarin1983@gmail.com',
+                nombre='Horacio David',
+                apellido='Bogarin',
+                password=make_password('Sipra2026'),
+                rol=admin_rol,
+                estado=True,
+            )
 
         # Crear proyectos de ejemplo si no existen
-        admin_user = Usuario.objects.filter(email='admin@admin.com').first()
-        carga_user = Usuario.objects.filter(email='carga@test.com').first()
         creador = admin_user or Usuario.objects.first()
         responsable = carga_user or Usuario.objects.first()
         if not creador:

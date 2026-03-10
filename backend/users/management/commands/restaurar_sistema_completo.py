@@ -1,25 +1,27 @@
 """
 Restaura todos los datos del sistema a su estado inicial completo:
 - Roles, áreas, secretarías
-- Usuarios (Admin, Visualizador, Carga, juancito perez, Pepe)
+- Usuarios bootstrap configurados por entorno
 - Planificación 2026 (ejes, planes, programas, objetivos)
 - Proyectos de ejemplo con tareas e historial
 - Reactiva usuarios desactivados
 """
+import os
 from django.core.management.base import BaseCommand
 from django.core.management import call_command
 from django.utils import timezone
-from django.contrib.auth.hashers import make_password
 from datetime import timedelta
 from users.models import Rol, Usuario
 from areas.models import Area
-from secretarias.models import Secretaria
 from projects.models import Proyecto, Etapa
 from tasks.models import Tarea, HistorialTarea
 
 
 class Command(BaseCommand):
     help = 'Restaura el sistema completo: roles, áreas, secretarías, usuarios, planificación 2026, proyectos y tareas'
+
+    def _env(self, name, default=''):
+        return (os.environ.get(name, default) or default).strip()
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -69,74 +71,15 @@ class Command(BaseCommand):
         area_desarrollo = areas_objs[1] if len(areas_objs) > 1 else None
         self.stdout.write(self.style.SUCCESS('  [OK] Areas creadas'))
 
-        # 6. Crear usuarios
-        Usuario.objects.get_or_create(
-            email='admin@admin.com',
-            defaults={
-                'nombre': 'Admin',
-                'apellido': 'Sistema',
-                'password': make_password('admin123'),
-                'rol': admin_rol,
-                'estado': True,
-            }
-        )
-
-        vis_user, vis_created = Usuario.objects.get_or_create(
-            email='visualizador@test.com',
-            defaults={
-                'nombre': 'Usuario',
-                'apellido': 'Visualizador',
-                'password': make_password('vis123'),
-                'rol': vis_rol,
-                'area': area_presidencia,
-                'estado': True,
-            }
-        )
-        if not vis_created and area_presidencia:
-            vis_user.area = area_presidencia
-            vis_user.save(update_fields=['area'])
-
-        carga_user, _ = Usuario.objects.get_or_create(
-            email='carga@test.com',
-            defaults={
-                'nombre': 'Usuario',
-                'apellido': 'Carga',
-                'password': make_password('carga123'),
-                'rol': carga_rol,
-                'area': area_desarrollo,
-                'estado': True,
-            }
-        )
-
-        # Usuarios adicionales para rol Carga (mencionados en uso del sistema)
-        Usuario.objects.get_or_create(
-            email='juancito@test.com',
-            defaults={
-                'nombre': 'Juancito',
-                'apellido': 'Perez',
-                'password': make_password('carga123'),
-                'rol': carga_rol,
-                'area': area_desarrollo,
-                'estado': True,
-            }
-        )
-
-        Usuario.objects.get_or_create(
-            email='pepe@test.com',
-            defaults={
-                'nombre': 'Pepe',
-                'apellido': 'García',
-                'password': make_password('carga123'),
-                'rol': carga_rol,
-                'area': area_desarrollo,
-                'estado': True,
-            }
-        )
-
+        # 6. Crear usuarios bootstrap configurados en .env
+        call_command('crear_datos_iniciales')
+        admin_email = self._env('BOOTSTRAP_ADMIN_EMAIL', 'admin@sipra.local').lower()
+        carga_email = self._env('BOOTSTRAP_CARGA_EMAIL', 'gestion.proyectos@sipra.local').lower()
         self.stdout.write(self.style.SUCCESS('  [OK] Usuarios creados'))
 
         # 7. Crear proyectos y tareas
-        admin_user = Usuario.objects.filter(email='admin@admin.com').first()
+        admin_user = Usuario.objects.filter(email=admin_email).first()
+        carga_user = Usuario.objects.filter(email=carga_email).first()
         creador = admin_user or Usuario.objects.first()
         responsable = carga_user or Usuario.objects.first()
 
@@ -213,10 +156,9 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('=== Restauracion completada ==='))
         self.stdout.write('')
         self.stdout.write('Usuarios disponibles:')
-        self.stdout.write('  - Admin: admin@admin.com / admin123')
-        self.stdout.write('  - Visualizador: visualizador@test.com / vis123')
-        self.stdout.write('  - Carga: carga@test.com / carga123')
-        self.stdout.write('  - Juancito Perez: juancito@test.com / carga123')
-        self.stdout.write('  - Pepe Garcia: pepe@test.com / carga123')
+        self.stdout.write(f'  - Admin: {self._env("BOOTSTRAP_ADMIN_EMAIL", "admin@sipra.local")}')
+        self.stdout.write(f'  - Visualización: {self._env("BOOTSTRAP_VISUALIZADOR_EMAIL", "visualizacion@sipra.local")}')
+        self.stdout.write(f'  - Carga: {self._env("BOOTSTRAP_CARGA_EMAIL", "gestion.proyectos@sipra.local")}')
+        self.stdout.write('  - Las contraseñas se toman desde el archivo .env o variables de entorno.')
         self.stdout.write('')
         self.stdout.write('Reinicie el servidor si está en ejecución.')

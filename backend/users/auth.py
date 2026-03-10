@@ -2,6 +2,7 @@
 Vistas de login y auth. Importa desde jwt_auth para evitar circular.
 """
 from django.contrib.auth.hashers import check_password
+from django.db import DatabaseError
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -26,20 +27,29 @@ class LoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         try:
-            usuario = Usuario.objects.select_related('rol', 'area', 'secretaria').get(
-                email__iexact=email, estado=True
-            )
-        except Usuario.DoesNotExist:
+            try:
+                usuario = Usuario.objects.select_related('rol', 'area', 'secretaria').get(
+                    email__iexact=email, estado=True
+                )
+            except Usuario.DoesNotExist:
+                return Response(
+                    {'error': 'Credenciales incorrectas.'},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            if not check_password(password, usuario.password):
+                return Response(
+                    {'error': 'Credenciales incorrectas.'},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            token = generate_token(usuario)
+        except DatabaseError:
             return Response(
-                {'error': 'Credenciales incorrectas.'},
-                status=status.HTTP_401_UNAUTHORIZED
+                {
+                    'error': 'No hay conexión con la base de datos PostgreSQL.',
+                    'code': 'db_unavailable',
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
-        if not check_password(password, usuario.password):
-            return Response(
-                {'error': 'Credenciales incorrectas.'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        token = generate_token(usuario)
         return Response({
             'success': True,
             'token': token,
