@@ -31,6 +31,7 @@ if errorlevel 1 (
 )
 
 echo [2/5] Cargando datos base (si faltan)...
+set "SKIP_PROYECTOS_EJEMPLO=1"
 python manage.py crear_datos_iniciales
 python manage.py cargar_secretarias 2>nul
 

@@ -144,11 +144,15 @@ class Command(BaseCommand):
                 estado=True,
             )
 
-        # Crear proyectos de ejemplo si no existen
+        # Crear proyectos de ejemplo si no existen (omitir con SKIP_PROYECTOS_EJEMPLO=1)
+        skip_ejemplos = (os.environ.get('SKIP_PROYECTOS_EJEMPLO', '') or '').strip().lower() in ('1', 'true', 'yes')
         creador = admin_user or Usuario.objects.first()
         responsable = carga_user or Usuario.objects.first()
-        if not creador:
-            self.stdout.write(self.style.WARNING('No hay usuarios. Saltando creación de proyectos.'))
+        if skip_ejemplos or not creador:
+            if skip_ejemplos:
+                self.stdout.write(self.style.NOTICE('Omitiendo proyectos de ejemplo (SKIP_PROYECTOS_EJEMPLO=1).'))
+            elif not creador:
+                self.stdout.write(self.style.WARNING('No hay usuarios. Saltando creación de proyectos.'))
         else:
             hoy = timezone.now().date()
             proyectos_ejemplo = [

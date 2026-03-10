@@ -432,8 +432,8 @@ export const entradasConocimiento: EntradaConocimiento[] = [
   {
     keywords: ['ayuda', 'cómo funciona', 'qué es esto', 'no entiendo'],
     respuesta: r(
-      'Asistente del sistema',
-      'Soy el asistente del Sistema de Seguimiento de Proyectos. Puede preguntarme sobre cualquier módulo: Dashboard, Proyectos, Tareas, Áreas, Secretarías, Usuarios, Roles, Avances, Planificación. Escriba su pregunta en lenguaje natural, por ejemplo: "¿Cómo reasigno un proyecto?" o "¿Qué hace el rol Carga?"',
+      'Asistente del sistema SIPRA',
+      'Soy el asistente de SIPRA. Puede preguntarme sobre: módulos (Dashboard, Proyectos, Tareas, Áreas, Secretarías, Usuarios, Roles), procesos (crear, reasignar, cargar avances), tecnología (arquitectura, credenciales, ejecutar sistema), backup/restore, comentarios, adjuntos, auditoría, indicadores, equipo, tareas particulares, alertas de vencimiento, producción. Escriba en lenguaje natural, ej: "¿Cómo ejecutar el sistema?" o "¿Qué son las tareas particulares?"',
       undefined,
       undefined,
       undefined
@@ -479,6 +479,302 @@ export const entradasConocimiento: EntradaConocimiento[] = [
       'Secretarías'
     ),
   },
+
+  // ========== ARQUITECTURA Y TECNOLOGÍA ==========
+  {
+    keywords: ['tecnología', 'stack', 'arquitectura', 'cómo está hecho', 'backend', 'frontend', 'django', 'vue'],
+    respuesta: r(
+      'Arquitectura del sistema SIPRA',
+      'SIPRA es un sistema full-stack: Backend en Django REST Framework (Python) con PostgreSQL. Frontend en Vue 3 + Vite + TypeScript. Autenticación JWT. API REST en /api/. El frontend usa proxy hacia el backend en desarrollo. Puerto backend: 8001, frontend: 5173.',
+      [
+        'Backend: Django 4.x, DRF, PostgreSQL, JWT.',
+        'Frontend: Vue 3, Vue Router, Axios, Vite.',
+        'Base de datos: PostgreSQL (obligatoria).',
+      ],
+      'URLs: Backend http://127.0.0.1:8001, Frontend http://localhost:5173',
+      undefined
+    ),
+  },
+  {
+    keywords: ['ejecutar sistema', 'iniciar', 'levantar', 'arrancar', 'ejecutar-sistema-completo', 'bat'],
+    respuesta: r(
+      'Cómo ejecutar el sistema',
+      'Use el archivo ejecutar-sistema-completo.bat en la raíz del proyecto. Este script: 1) Verifica conexión a PostgreSQL y ejecuta migraciones. 2) Carga datos iniciales (roles, usuarios, áreas). 3) Inicia el backend en puerto 8001. 4) Inicia el frontend en puerto 5173. Requiere PostgreSQL corriendo con base "sipra".',
+      [
+        'PostgreSQL debe estar activo en localhost:5432.',
+        'Base de datos: sipra. Usuario: postgres.',
+        'No cierre las ventanas de backend y frontend.',
+      ],
+      'Alternativa: diagnostico-db.bat para verificar la conexión a la BD.',
+      undefined
+    ),
+  },
+  {
+    keywords: ['credenciales', 'contraseña', 'usuario admin', 'login', 'iniciar sesión', 'acceso'],
+    respuesta: r(
+      'Credenciales de acceso',
+      'Usuarios por defecto: admin@admin.com / admin123, admin@sipra.local / AdminSipra2026!, bogarin1983@gmail.com / Sipra2026. Si no puede ingresar: verifique que el backend esté corriendo (puerto 8001), que PostgreSQL esté activo, y que use la URL correcta del frontend (localhost:5173).',
+      [
+        'Token inválido o expirado: cierre sesión, borre localStorage o use ventana de incógnito.',
+        'Error de conexión: el backend no está corriendo o hay problema de red.',
+        'Credenciales incorrectas: verifique email y contraseña (mayúsculas/minúsculas).',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['token expirado', 'sesión caducada', 'cerrar sesión', 'logout'],
+    respuesta: r(
+      'Token y sesión',
+      'El sistema usa JWT con expiración configurable (por defecto 8 horas). Si aparece "Token inválido o expirado": cierre sesión desde el menú, borre el localStorage del sitio, o abra en ventana de incógnito. El heartbeat de sesión mantiene la sesión activa mientras navega.',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
+
+  // ========== BACKUP Y RESTORE ==========
+  {
+    keywords: ['backup', 'respaldo', 'guardar copia', 'exportar datos'],
+    respuesta: r(
+      'Backup del sistema',
+      'En el módulo Backup y Restore (solo Administrador) puede crear backups de la base de datos PostgreSQL y del código. Los backups se guardan en la carpeta configurada. Hay backup de datos (pg_dump) y backup de código. Use "Crear backup" para generar una copia en el momento actual.',
+      [
+        'Backup de datos: exporta la base PostgreSQL completa.',
+        'Backup de código: copia los archivos del proyecto.',
+        'Los backups permiten restaurar en caso de fallo.',
+      ],
+      undefined,
+      'Backup y Restore'
+    ),
+  },
+  {
+    keywords: ['restore', 'restaurar', 'recuperar', 'restaurar-datos', 'restaurar_sistema_completo'],
+    respuesta: r(
+      'Restaurar datos',
+      'Restaurar sistema completo: ejecute restaurar-datos.bat o el comando "python manage.py restaurar_sistema_completo" desde la carpeta backend. Restaura roles, áreas, secretarías, usuarios bootstrap, planificación 2026, proyectos de ejemplo y tareas. Los usuarios existentes se reactivan. Luego ejecute ejecutar-sistema-completo.bat para iniciar.',
+      undefined,
+      undefined,
+      'Backup y Restore'
+    ),
+  },
+
+  // ========== COMENTARIOS Y ADJUNTOS ==========
+  {
+    keywords: ['comentario proyecto', 'comentar proyecto', 'comentarios'],
+    respuesta: r(
+      'Comentarios en proyectos',
+      'En el detalle del proyecto puede agregar comentarios. Los Administradores pueden editar/eliminar cualquier comentario. Los usuarios normales solo pueden editar o eliminar sus propios comentarios dentro de los primeros 15 minutos. Los comentarios quedan registrados para trazabilidad.',
+      [
+        'Los comentarios son visibles para quienes tienen acceso al proyecto.',
+        'Hay auditoría de ediciones y eliminaciones (solo Admin).',
+        'Use comentarios para documentar decisiones o avances.',
+      ],
+      undefined,
+      'Proyectos'
+    ),
+  },
+  {
+    keywords: ['adjunto', 'archivo', 'subir archivo', 'documento', 'pdf', 'excel'],
+    respuesta: r(
+      'Adjuntos y archivos',
+      'Puede subir archivos a proyectos y tareas. Formatos permitidos: PDF, Word, Excel, PowerPoint, CSV, TXT, imágenes (PNG, JPG, JPEG, WebP). Tamaño máximo configurable (por defecto 10 MB). Los adjuntos se validan por tipo y extensión. Hay auditoría de adjuntos (solo Administrador).',
+      [
+        'Adjuntos de proyecto: en el detalle del proyecto.',
+        'Adjuntos de tarea: en el detalle de la tarea.',
+        'Los adjuntos quedan vinculados al proyecto/tarea.',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['auditoría', 'log', 'historial ediciones', 'quién editó', 'auditoria comentarios'],
+    respuesta: r(
+      'Auditoría',
+      'El sistema registra auditoría de comentarios y adjuntos. Solo el Administrador puede ver el log de auditoría. Muestra: quién editó/eliminó, cuándo, texto anterior y nuevo. Filtros por proyecto, tarea, usuario, tipo y fechas. Acceso desde el menú o módulo correspondiente.',
+      undefined,
+      undefined,
+      'Auditoría'
+    ),
+  },
+
+  // ========== INDICADORES Y PLANIFICACIÓN ==========
+  {
+    keywords: ['indicador', 'indicadores proyecto', 'seguimiento indicador'],
+    respuesta: r(
+      'Indicadores de proyecto',
+      'Cada proyecto puede tener indicadores de seguimiento: descripción, unidad de medida y frecuencia. Los indicadores se gestionan en el módulo de Planificación o en el detalle del proyecto. Se vinculan al objetivo estratégico y permiten medir el avance cualitativo del proyecto.',
+      [
+        'Indicadores: descripción, unidad de medida, frecuencia.',
+        'Se asocian a proyectos vinculados a objetivos estratégicos.',
+        'Complementan el avance porcentual de las tareas.',
+      ],
+      undefined,
+      'Planificación'
+    ),
+  },
+  {
+    keywords: ['objetivo estratégico', 'vincular objetivo', 'objetivo proyecto'],
+    respuesta: r(
+      'Objetivos estratégicos',
+      'Los objetivos estratégicos pertenecen a un programa. Los proyectos se vinculan a un objetivo estratégico al crearlos o editarlos. Esto permite trazabilidad: Eje → Plan → Programa → Objetivo → Proyecto → Indicadores. La planificación 2026 define la estructura completa.',
+      undefined,
+      undefined,
+      'Planificación'
+    ),
+  },
+
+  // ========== EQUIPO Y ESTRUCTURA ==========
+  {
+    keywords: ['equipo proyecto', 'miembros equipo', 'asignar equipo', 'proyecto equipo'],
+    respuesta: r(
+      'Equipo del proyecto',
+      'Cada proyecto puede tener un equipo de miembros asignados. Se gestiona en Proyecto Área / Proyecto Equipo o en el formulario del proyecto. Los miembros del equipo participan en el proyecto con permisos limitados. El responsable principal (usuario_responsable) es quien lidera.',
+      [
+        'Responsable: usuario principal a cargo del proyecto.',
+        'Equipo: miembros adicionales que participan.',
+        'Áreas asignadas: pueden vincularse varias áreas al proyecto.',
+      ],
+      undefined,
+      'Proyectos'
+    ),
+  },
+  {
+    keywords: ['tarea particular', 'tarea sin proyecto', 'tarea administrativa'],
+    respuesta: r(
+      'Tareas particulares',
+      'Las tareas pueden existir sin proyecto (tareas particulares o administrativas). Se asignan a un responsable y área/secretaría. Aparecen en el Dashboard del usuario en la sección "Tareas particulares". Se gestionan igual que las tareas de proyecto pero sin vinculación a un proyecto.',
+      [
+        'Útiles para tareas administrativas o de soporte.',
+        'El avance de tareas particulares no impacta proyectos.',
+        'Se cuentan por separado en el Dashboard ejecutivo.',
+      ],
+      undefined,
+      'Tareas'
+    ),
+  },
+  {
+    keywords: ['etapa', 'etapas proyecto', 'fases'],
+    respuesta: r(
+      'Etapas del proyecto',
+      'Cada proyecto tiene etapas (fases). Las tareas se asignan a una etapa. Las etapas tienen orden y porcentaje de avance. Al crear un proyecto puede crear etapas. Las tareas se organizan por etapa para estructurar el trabajo.',
+      undefined,
+      undefined,
+      'Proyectos'
+    ),
+  },
+
+  // ========== DASHBOARD EJECUTIVO Y ALERTAS ==========
+  {
+    keywords: ['dashboard ejecutivo', 'vista ejecutivo', 'métricas admin'],
+    respuesta: r(
+      'Dashboard ejecutivo',
+      'Solo el Administrador ve el Dashboard ejecutivo. Muestra: total proyectos, proyectos activos, total tareas, tareas finalizadas, bloqueadas, tareas particulares, avance global y avance de tareas particulares. Es una vista consolidada para la dirección.',
+      undefined,
+      undefined,
+      'Dashboard'
+    ),
+  },
+  {
+    keywords: ['alerta vencimiento', 'vencimiento', 'tarea vencida', 'próxima a vencer'],
+    respuesta: r(
+      'Alertas de vencimiento',
+      'El sistema puede mostrar alertas de tareas y proyectos próximos a vencer o vencidos. Las tareas tienen fecha_vencimiento y los proyectos fecha_fin_estimada. Las alertas excluyen tareas Finalizadas y proyectos Finalizados. Solo Administrador y Visualizador ven las alertas.',
+      [
+        'Tareas: por fecha_vencimiento.',
+        'Proyectos: por fecha_fin_estimada.',
+        'Use el calendario para ver fechas de vencimiento.',
+      ],
+      undefined,
+      'Dashboard'
+    ),
+  },
+  {
+    keywords: ['calendario', 'fechas', 'ver fechas'],
+    respuesta: r(
+      'Calendario',
+      'El módulo Calendario muestra las tareas y proyectos en vista de calendario según sus fechas de inicio y vencimiento. Permite visualizar la carga de trabajo en el tiempo y detectar concentraciones o vencimientos próximos.',
+      undefined,
+      undefined,
+      'Calendario'
+    ),
+  },
+
+  // ========== EVOLUCIÓN Y GRÁFICAS ==========
+  {
+    keywords: ['evolución', 'gráfica', 'gráfico avance', 'serie temporal'],
+    respuesta: r(
+      'Evolución del proyecto',
+      'En el detalle del proyecto puede ver la evolución temporal del avance: una serie de puntos (fecha, porcentaje) que muestra cómo ha ido avanzando el proyecto en el tiempo. Se calcula a partir del historial de avances de las tareas.',
+      undefined,
+      undefined,
+      'Proyectos'
+    ),
+  },
+
+  // ========== PRODUCCIÓN Y DESPLIEGUE ==========
+  {
+    keywords: ['producción', 'desplegar', 'deploy', 'poner en producción'],
+    respuesta: r(
+      'Despliegue en producción',
+      'Para producción: 1) Use Gunicorn u otro servidor WSGI (no runserver). 2) Configure variables de entorno: SECRET_KEY, ALLOWED_HOSTS, credenciales PostgreSQL. 3) Use HTTPS (Nginx/Caddy con Let\'s Encrypt). 4) No ponga credenciales en archivos .bat. 5) Consulte DEPLOY_DEMO.md para opciones (VPS, Render, Railway).',
+      [
+        'DEBUG=0 en producción.',
+        'SECRET_KEY y ALLOWED_HOSTS obligatorios.',
+        'PostgreSQL en servidor dedicado o gestionado.',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['variables entorno', 'configuración', 'env', 'postgres'],
+    respuesta: r(
+      'Variables de entorno',
+      'Variables clave: SECRET_KEY (obligatoria en prod), DEBUG (0 en prod), ALLOWED_HOSTS (dominios permitidos), POSTGRES_DB_HOST, POSTGRES_DB_PORT, POSTGRES_DB_NAME, POSTGRES_DB_USER, POSTGRES_DB_PASSWORD. Use archivo .env en la raíz (no subir al repositorio).',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['migración', 'migrate', 'migraciones', 'actualizar base datos'],
+    respuesta: r(
+      'Migraciones de base de datos',
+      'Las migraciones se ejecutan con: python manage.py migrate (desde la carpeta backend). El script ejecutar-sistema-completo.bat ya las ejecuta. Si hay cambios en modelos, cree migraciones con: python manage.py makemigrations. Luego migrate para aplicarlas.',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
+
+  // ========== ERRORES Y SOLUCIÓN ==========
+  {
+    keywords: ['error', 'no funciona', 'falla', 'problema', 'no puedo'],
+    respuesta: r(
+      'Solución de problemas',
+      'Errores comunes: 1) No puedo ingresar: verifique backend en 8001, PostgreSQL activo, credenciales correctas. 2) Token expirado: cierre sesión, borre localStorage. 3) Error de conexión: backend no está corriendo. 4) Error de BD: ejecute diagnostico-db.bat. 5) Credenciales en .bat: use .env para no exponer contraseñas.',
+      [
+        'diagnostico-db.bat: verifica conexión a PostgreSQL.',
+        'restaurar-datos.bat: restaura datos iniciales.',
+        'ejecutar-sistema-completo.bat: inicia todo el sistema.',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['sipra', 'qué es sipra', 'sistema planificación'],
+    respuesta: r(
+      'SIPRA',
+      'SIPRA es el Sistema Integrado de Planificación de Proyectos por Área. Permite gestionar proyectos, tareas, avances, áreas, secretarías, usuarios y roles. Incluye planificación estratégica (ejes, planes, programas, objetivos), dashboards, alertas de vencimiento, backup/restore y auditoría. Desarrollado para la Agencia de Innovación.',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
 ]
 
 /** Obtener sugerencias de preguntas según la ruta actual */
@@ -487,7 +783,7 @@ export function obtenerSugerenciasPorRuta(ruta: string): string[] {
     '/dashboard': [
       '¿Qué información muestra el Dashboard?',
       '¿Cómo se interpretan los indicadores?',
-      '¿Qué significan los estados?',
+      '¿Qué es el Dashboard ejecutivo?',
     ],
     '/avances-por-area': [
       '¿Cómo se visualizan los proyectos por área?',
@@ -501,16 +797,17 @@ export function obtenerSugerenciasPorRuta(ruta: string): string[] {
     '/planificacion': [
       '¿Cómo se crean Planes y Programas?',
       '¿Cómo se vinculan los objetivos a proyectos?',
+      '¿Qué son los indicadores de proyecto?',
     ],
     '/proyectos': [
       '¿Cómo crear un proyecto?',
       '¿Cómo reasignar un proyecto?',
-      '¿Qué significa cada estado?',
+      '¿Cómo asignar equipo a un proyecto?',
     ],
     '/tareas': [
       '¿Cómo crear una tarea?',
       '¿Cómo se actualiza el avance?',
-      '¿Cómo se cierra una tarea?',
+      '¿Qué son las tareas particulares?',
     ],
     '/areas': [
       '¿Cómo crear o editar un área?',
@@ -529,12 +826,26 @@ export function obtenerSugerenciasPorRuta(ruta: string): string[] {
       '¿Cómo actualizar el avance de una tarea?',
       '¿Qué pasa al cargar 100%?',
     ],
+    '/backup': [
+      '¿Cómo hacer backup del sistema?',
+      '¿Cómo restaurar los datos?',
+    ],
+    '/calendario': [
+      '¿Qué muestra el calendario?',
+      '¿Cómo ver las alertas de vencimiento?',
+    ],
+    '/auditoria': [
+      '¿Qué registra la auditoría?',
+      '¿Quién puede ver el log de auditoría?',
+    ],
   }
   for (const [path, preguntas] of Object.entries(sugerencias)) {
     if (ruta.startsWith(path)) return preguntas
   }
   return [
-    '¿Qué hace el Dashboard?',
+    '¿Qué es SIPRA?',
+    '¿Cómo ejecutar el sistema?',
+    '¿Cuáles son las credenciales de acceso?',
     '¿Cómo crear un proyecto?',
     '¿Cuáles son las diferencias entre roles?',
   ]

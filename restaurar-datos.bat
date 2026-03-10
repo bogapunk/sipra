@@ -15,6 +15,7 @@ set "POSTGRES_DB_PORT=5432"
 set "POSTGRES_DB_NAME=sipra"
 set "POSTGRES_DB_USER=postgres"
 set "POSTGRES_DB_PASSWORD=30153846"
+set "SKIP_PROYECTOS_EJEMPLO=1"
 
 python manage.py restaurar_sistema_completo
 

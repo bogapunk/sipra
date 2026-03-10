@@ -77,13 +77,14 @@ class Command(BaseCommand):
         carga_email = self._env('BOOTSTRAP_CARGA_EMAIL', 'gestion.proyectos@sipra.local').lower()
         self.stdout.write(self.style.SUCCESS('  [OK] Usuarios creados'))
 
-        # 7. Crear proyectos y tareas
+        # 7. Crear proyectos y tareas (omitir con SKIP_PROYECTOS_EJEMPLO=1)
+        skip_ejemplos = (os.environ.get('SKIP_PROYECTOS_EJEMPLO', '') or '').strip().lower() in ('1', 'true', 'yes')
         admin_user = Usuario.objects.filter(email=admin_email).first()
         carga_user = Usuario.objects.filter(email=carga_email).first()
         creador = admin_user or Usuario.objects.first()
         responsable = carga_user or Usuario.objects.first()
 
-        if creador:
+        if creador and not skip_ejemplos:
             hoy = timezone.now().date()
             proyectos_ejemplo = [
                 ('Sistema de Planificación', 'Sistema de seguimiento de proyectos y tareas'),
@@ -151,6 +152,8 @@ class Command(BaseCommand):
             )
 
             self.stdout.write(self.style.SUCCESS('  [OK] Proyectos y tareas creados'))
+        elif skip_ejemplos:
+            self.stdout.write(self.style.NOTICE('  [--] Proyectos de ejemplo omitidos (SKIP_PROYECTOS_EJEMPLO=1)'))
 
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('=== Restauracion completada ==='))
