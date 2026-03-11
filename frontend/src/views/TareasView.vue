@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import { exportToCsv } from '@/utils/exportCsv'
 import IconDownload from '@/components/icons/IconDownload.vue'
@@ -17,6 +18,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import { estadoVencimiento, claseVencimiento } from '@/utils/vencimiento'
 import { extraerMensajeError } from '@/utils/apiError'
 
+const route = useRoute()
+const router = useRouter()
 const { user, isAdmin, isVisualizador } = useAuth()
 const MINUTOS_EDICION = 15
 
@@ -537,7 +540,23 @@ const tareasParaPadre = computed(() => {
   return raices.filter((t: Record<string, unknown>) => (t.id as number) !== id)
 })
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  const verId = route.query.ver
+  if (verId) {
+    const id = Number(verId)
+    if (id) {
+      try {
+        const res = await api.get(`tareas/${id}/`)
+        const t = res.data as Record<string, unknown>
+        openVer(t)
+        router.replace({ path: '/tareas', query: {} })
+      } catch {
+        toast.error('No se pudo cargar el detalle de la tarea.')
+      }
+    }
+  }
+})
 </script>
 
 <template>

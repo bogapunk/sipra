@@ -43,18 +43,21 @@ class UsuariosParaSelectorView(APIView):
     Parámetros opcionales: area, secretaria - filtra usuarios por área o secretaría."""
     def get(self, request):
         require_roles(request.user, ROL_ADMIN, message='Solo el Administrador puede consultar el selector de usuarios.')
-        usuarios = Usuario.objects.filter(estado=True).order_by('nombre', 'apellido')
+        qs = Usuario.objects.filter(estado=True).order_by('nombre', 'apellido')
         area_id = request.query_params.get('area')
         secretaria_id = request.query_params.get('secretaria')
         if area_id:
             try:
-                usuarios = usuarios.filter(area_id=int(area_id))
+                qs = qs.filter(area_id=int(area_id))
             except (ValueError, TypeError):
                 pass
         if secretaria_id:
             try:
-                usuarios = usuarios.filter(secretaria_id=int(secretaria_id))
+                qs = qs.filter(secretaria_id=int(secretaria_id))
             except (ValueError, TypeError):
                 pass
-        data = [{'id': u.id, 'nombre': u.nombre, 'apellido': u.apellido or '', 'nombre_completo': u.nombre_completo} for u in usuarios]
+        data = [
+            {'id': r['id'], 'nombre': r['nombre'] or '', 'apellido': r['apellido'] or '', 'nombre_completo': f"{r['nombre'] or ''} {r['apellido'] or ''}".strip()}
+            for r in qs.values('id', 'nombre', 'apellido')
+        ]
         return Response(data)

@@ -495,6 +495,7 @@ watch(proyectoId, () => {
               <th>Estado</th>
               <th>Avance</th>
               <th>Fecha de vencimiento</th>
+              <th class="col-acciones">Acciones</th>
               <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
           </thead>
@@ -522,6 +523,9 @@ watch(proyectoId, () => {
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
+              <td class="col-acciones">
+                <router-link :to="`/tareas?ver=${item.tarea.id}`" class="btn-ver-detalle">Ver detalle</router-link>
+              </td>
               <td v-if="modoOrden && !isVisualizador" class="orden-col">
                 <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
               </td>
@@ -540,6 +544,7 @@ watch(proyectoId, () => {
               <th>Estado</th>
               <th>Avance</th>
               <th>Fecha de vencimiento</th>
+              <th class="col-acciones">Acciones</th>
               <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
           </thead>
@@ -567,6 +572,9 @@ watch(proyectoId, () => {
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
+              <td class="col-acciones">
+                <router-link :to="`/tareas?ver=${item.tarea.id}`" class="btn-ver-detalle">Ver detalle</router-link>
+              </td>
               <td v-if="modoOrden && !isVisualizador" class="orden-col">
                 <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
               </td>
@@ -585,6 +593,7 @@ watch(proyectoId, () => {
               <th>Estado</th>
               <th>Avance</th>
               <th>Fecha de vencimiento</th>
+              <th class="col-acciones">Acciones</th>
               <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
           </thead>
@@ -611,6 +620,9 @@ watch(proyectoId, () => {
                   {{ item.tarea.fecha_vencimiento }}
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
+              </td>
+              <td class="col-acciones">
+                <router-link :to="`/tareas?ver=${item.tarea.id}`" class="btn-ver-detalle">Ver detalle</router-link>
               </td>
               <td v-if="modoOrden && !isVisualizador" class="orden-col">
                 <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
@@ -845,5 +857,20 @@ watch(proyectoId, () => {
 .adjunto-link:hover { text-decoration: underline; }
 .adjunto-upload input[type="file"] { font-size: 0.85rem; }
 .adjunto-loading { font-size: 0.85rem; color: #64748b; margin-left: 0.5rem; }
+.col-acciones { white-space: nowrap; min-width: 6rem; }
+.btn-ver-detalle {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  color: #2563eb;
+  text-decoration: none;
+  border-radius: 4px;
+  background: #eff6ff;
+  transition: background 0.2s;
+}
+.btn-ver-detalle:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
 
 </style>
