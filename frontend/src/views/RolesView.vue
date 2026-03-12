@@ -53,6 +53,10 @@ const rolesFiltrados = computed(() => {
   )
 })
 
+const resumenRoles = computed(() => ([
+  { key: 'total', title: 'Roles visibles', value: rolesFiltrados.value.length, meta: 'Resultado actual de la vista', tone: 'neutral' },
+]))
+
 async function descargarExcel() {
   const lista = rolesFiltrados.value
   const headers = ['Nombre', 'Descripción']
@@ -135,8 +139,22 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <h1>Roles</h1>
-    <div class="toolbar">
+    <div class="page-hero">
+      <div>
+        <h1>Roles</h1>
+        <p class="page-subtitle">Gestión homogénea de perfiles y permisos del sistema.</p>
+      </div>
+    </div>
+
+    <section class="summary-grid roles-summary">
+      <article v-for="card in resumenRoles" :key="card.key" class="summary-card" :class="`tone-${card.tone}`">
+        <span class="summary-title">{{ card.title }}</span>
+        <strong class="summary-value">{{ card.value }}</strong>
+        <span class="summary-meta">{{ card.meta }}</span>
+      </article>
+    </section>
+
+    <div class="toolbar toolbar-card">
       <input
         v-model="buscarRol"
         type="search"
@@ -161,8 +179,8 @@ onMounted(load)
       :mensaje="buscarRol.trim() ? 'No se encontraron roles que coincidan con la búsqueda.' : 'Aún no hay roles cargados. Use el botón «Nuevo rol» para crear el primero.'"
       icono="lista"
     />
-    <div v-else class="table-wrapper">
-      <table class="table">
+    <div v-else class="table-wrapper app-table-wrapper">
+      <table class="table app-table">
       <thead>
         <tr>
           <th>Nombre</th>
@@ -186,16 +204,16 @@ onMounted(load)
 
     <!-- Modal Ver detalle rol -->
     <div v-if="showVerModal && rolVer" class="modal-overlay" @click.self="closeVerModal">
-      <div class="modal modal-ver">
+      <div class="modal modal-ver app-modal app-modal-md">
         <h2>Detalle del rol</h2>
-        <div class="detalle-content">
-          <div class="detalle-row">
-            <span class="detalle-label">Nombre</span>
-            <span class="detalle-valor">{{ rolVer.nombre || '-' }}</span>
+        <div class="detalle-content app-detail-content">
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Nombre</span>
+            <span class="detalle-valor app-detail-value">{{ rolVer.nombre || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Descripción</span>
-            <p class="detalle-valor detalle-desc">{{ rolVer.descripcion || '-' }}</p>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Descripción</span>
+            <p class="detalle-valor detalle-desc app-detail-value app-detail-desc">{{ rolVer.descripcion || '-' }}</p>
           </div>
         </div>
         <div class="modal-actions">
@@ -205,19 +223,20 @@ onMounted(load)
     </div>
 
     <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
-      <div class="modal">
+      <div class="modal app-modal app-modal-sm">
         <h2>{{ editingId ? 'Editar' : 'Nuevo' }} rol</h2>
-        <form @submit.prevent="save">
+        <form class="app-form" @submit.prevent="save">
           <label>Nombre <span class="required">*</span></label>
           <input
             v-model="form.nombre"
             placeholder="Nombre"
+            class="app-input"
             :class="{ 'input-error': errorNombre }"
             @blur="validarNombre"
           />
           <span v-if="errorNombre" class="error-msg">{{ errorNombre }}</span>
           <label>Descripción</label>
-          <textarea v-model="form.descripcion" placeholder="Descripción" rows="3" />
+          <textarea v-model="form.descripcion" class="app-textarea" placeholder="Descripción" rows="3" />
           <div class="modal-actions">
             <button type="submit" class="btn-primary"><IconSave class="btn-icon" /> Guardar</button>
             <button type="button" class="btn-cancel" @click="closeForm"><IconCancel class="btn-icon" /> Cancelar</button>
@@ -229,44 +248,22 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page h1 { margin-bottom: 1rem; }
+.page { display: flex; flex-direction: column; gap: 1rem; }
+.page h1 { margin: 0; }
+.roles-summary { grid-template-columns: minmax(0, 1fr); max-width: 320px; }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
-  margin-bottom: 1rem;
 }
 .search-input {
   flex: 1;
   min-width: 200px;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
   font-size: 0.9rem;
 }
 .toolbar-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.btn-secondary {
-  background: #16a34a;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.btn-secondary:disabled { background: #94a3b8; cursor: not-allowed; }
-.btn-primary {
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.table { width: 100%; background: white; border-radius: 8px; overflow: hidden; }
-.table th, .table td { padding: 0.75rem 1rem; text-align: left; }
-.table th { background: #f8fafc; }
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
 .modal-overlay {
@@ -278,26 +275,7 @@ onMounted(load)
   justify-content: center;
   z-index: 100;
 }
-.modal {
-  background: white;
-  padding: 1.5rem;
-  border-radius: 10px;
-  max-width: 400px;
-  width: 90%;
-}
-.modal form { display: flex; flex-direction: column; gap: 0.5rem; }
-.modal input, .modal textarea {
-  padding: 0.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-}
 .required { color: #dc2626; }
 .input-error { border-color: #dc2626 !important; }
 .error-msg { font-size: 0.85rem; color: #dc2626; margin-top: -0.25rem; }
-.modal-ver { max-width: 480px; }
-.detalle-content { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem; }
-.detalle-row { display: flex; flex-direction: column; gap: 0.25rem; }
-.detalle-label { font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
-.detalle-valor { font-size: 0.95rem; color: #1e293b; }
-.detalle-desc { white-space: pre-wrap; line-height: 1.5; margin: 0; }
 </style>

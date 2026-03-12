@@ -1,4 +1,9 @@
-import ExcelJS from 'exceljs'
+let excelJsPromise: Promise<typeof import('exceljs')> | null = null
+
+async function loadExcelJs() {
+  excelJsPromise ??= import('exceljs')
+  return excelJsPromise
+}
 
 /**
  * Exporta datos a Excel (.xlsx) con formato estructurado:
@@ -12,6 +17,7 @@ export async function exportToCsv(
   rows: string[][],
   filename: string
 ): Promise<void> {
+  const { default: ExcelJS } = await loadExcelJs()
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet('Datos', {
     views: [{ state: 'frozen', ySplit: 1 }],

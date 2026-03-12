@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { api } from '@/services/api'
 import { useAuth } from '@/composables/useAuth'
 import { useToast } from '@/composables/useToast'
@@ -170,6 +170,7 @@ async function load() {
 }
 
 onMounted(load)
+onActivated(load)
 
 async function openModal(tarea: Record<string, unknown>) {
   tareaEdit.value = tarea
@@ -422,7 +423,9 @@ async function saveAvance() {
       </button>
     </div>
 
-    <LoaderSpinner v-if="carga" texto="Cargando tareas y proyectos..." />
+    <div v-if="carga" class="cargar-preloader">
+      <LoaderSpinner texto="Cargando tareas y proyectos..." />
+    </div>
 
     <p v-else-if="error" class="error-msg">{{ error }}</p>
 
@@ -731,6 +734,17 @@ async function saveAvance() {
   width: fit-content;
 }
 .tarea-meta { font-size: 0.875rem; color: #64748b; }
+.cargar-preloader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  padding: 2rem;
+  background: linear-gradient(135deg, #f8fbff 0%, #f1f5f9 100%);
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  margin: 1rem 0;
+}
 .error-msg { color: #dc2626; background: #fef2f2; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem; }
 .empty-msg { color: #64748b; }
 .modal-overlay {

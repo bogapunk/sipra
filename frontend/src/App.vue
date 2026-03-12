@@ -36,6 +36,11 @@ body {
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: #f1f5f9;
   color: #334155;
+  overflow-x: hidden;
+}
+#app {
+  min-height: 100vh;
+  overflow-x: hidden;
 }
 a {
   color: var(--aif-secondary);

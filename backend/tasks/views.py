@@ -5,7 +5,14 @@ from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q, Prefetch, Max
 from .models import Tarea, HistorialTarea, ComentarioTarea, AdjuntoTarea
 from projects.models import AdjuntoAuditLog
-from .serializers import TareaSerializer, HistorialTareaSerializer, ComentarioTareaSerializer, AdjuntoTareaSerializer
+from config.pagination import TaskListPagination
+from .serializers import (
+    TareaListSerializer,
+    TareaSerializer,
+    HistorialTareaSerializer,
+    ComentarioTareaSerializer,
+    AdjuntoTareaSerializer,
+)
 from users.access import (
     ROL_ADMIN,
     ROL_CARGA,
@@ -22,10 +29,9 @@ MINUTOS_EDICION_USUARIO = 15
 class TareaViewSet(viewsets.ModelViewSet):
     queryset = Tarea.objects.select_related(
         'area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'
-    ).prefetch_related(
-        Prefetch('subtareas', queryset=Tarea.objects.select_related('area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'))
     )
     serializer_class = TareaSerializer
+    pagination_class = TaskListPagination
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -86,20 +92,24 @@ class TareaViewSet(viewsets.ModelViewSet):
             if tareas_proy.exists() and all(t.porcentaje_avance == 100 for t in tareas_proy):
                 Proyecto.objects.filter(id=instance.proyecto_id).update(estado='Finalizado')
 
+    def get_serializer_class(self):
+        if getattr(self, 'action', None) == 'list':
+            return TareaListSerializer
+        return TareaSerializer
+
     def get_queryset(self):
         qs = Tarea.objects.select_related(
             'area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'
-        ).prefetch_related(
-            Prefetch(
-                'subtareas',
-                queryset=Tarea.objects.select_related('area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre').order_by('orden', 'id')
-            )
         )
         proyecto = self.request.query_params.get("proyecto")
         area = self.request.query_params.get("area")
         estado = self.request.query_params.get("estado")
         responsable = self.request.query_params.get("responsable")
         usuario = self.request.query_params.get("usuario")
+        secretaria = self.request.query_params.get("secretaria")
+        search = (self.request.query_params.get("search") or "").strip()
+        vencimiento = self.request.query_params.get("vencimiento")
+        solo_raices = self.request.query_params.get("solo_raices") == "1"
         if usuario:
             from users.models import Usuario
             from projects.models import Proyecto, ProyectoEquipo
@@ -120,14 +130,48 @@ class TareaViewSet(viewsets.ModelViewSet):
             qs = qs.filter(proyecto_id=proyecto)
         if area and not usuario:
             qs = qs.filter(area_id=area)
-        secretaria = self.request.query_params.get("secretaria")
         if secretaria and not usuario:
             qs = qs.filter(secretaria_id=secretaria)
         if estado:
             qs = qs.filter(estado=estado)
         if responsable and not usuario:
             qs = qs.filter(responsable_id=responsable)
-        return filter_tasks_for_user(qs.order_by('tarea_padre_id', 'orden', 'id'), self.request.user)
+        if search:
+            qs = qs.filter(
+                Q(titulo__icontains=search) |
+                Q(descripcion__icontains=search) |
+                Q(proyecto__nombre__icontains=search) |
+                Q(responsable__nombre__icontains=search) |
+                Q(responsable__apellido__icontains=search) |
+                Q(area__nombre__icontains=search) |
+                Q(secretaria__nombre__icontains=search)
+            )
+        if vencimiento:
+            hoy = timezone.now().date()
+            limite = hoy + timedelta(days=7)
+            if vencimiento == 'vencidas':
+                qs = qs.exclude(estado='Finalizada').filter(fecha_vencimiento__lt=hoy)
+            elif vencimiento == 'proximas':
+                qs = qs.exclude(estado='Finalizada').filter(
+                    fecha_vencimiento__gte=hoy,
+                    fecha_vencimiento__lte=limite,
+                )
+            elif vencimiento == 'en-plazo':
+                qs = qs.exclude(estado='Finalizada').filter(fecha_vencimiento__gt=limite)
+        qs = filter_tasks_for_user(qs, self.request.user)
+        if getattr(self, 'action', None) == 'retrieve':
+            return qs.prefetch_related(
+                Prefetch(
+                    'subtareas',
+                    queryset=Tarea.objects.select_related(
+                        'area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'
+                    ).order_by('orden', 'id'),
+                    to_attr='subtareas_prefetch',
+                )
+            ).order_by('tarea_padre_id', 'orden', 'id')
+        if solo_raices:
+            qs = qs.filter(tarea_padre__isnull=True)
+        return qs.order_by('tarea_padre_id', 'orden', 'id')
 
 
 class HistorialTareaViewSet(viewsets.ModelViewSet):

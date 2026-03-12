@@ -16,6 +16,15 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('node_modules/vue') || id.includes('node_modules/@vue')) return 'vendor-vue'
           if (id.includes('node_modules/axios')) return 'vendor-axios'
+          if (id.includes('node_modules/echarts') || id.includes('node_modules/vue-echarts')) return 'vendor-charts'
+          if (
+            id.includes('node_modules/exceljs') ||
+            id.includes('node_modules/jszip') ||
+            id.includes('node_modules/pako') ||
+            id.includes('node_modules/readable-stream') ||
+            id.includes('node_modules/saxes') ||
+            id.includes('node_modules/fast-csv')
+          ) return 'vendor-export'
         },
       },
     },

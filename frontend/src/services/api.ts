@@ -20,9 +20,10 @@ const CACHEABLE = [
   /^objetivos-estrategicos\/?(\?|$)/, /^indicadores\/?(\?|$)/,
   /^dashboard\/proyectos\/\d+\//,
   /^dashboard\/ejecutivo\/?(\?|$)/,
+  /^dashboard\/analitico\/?(\?|$)/,
   // dashboard/proyectos/ NO cacheado: el Dashboard debe mostrar siempre el conteo real
   /^dashboard\/usuarios\/\d+\/proyectos\/?(\?|$)/,
-  /^tareas\/?(\?|$)/, /^planificacion\/arbol\/?(\?|$)/,
+  /^planificacion\/arbol\/?(\?|$)/,
   /^avances\/por-area\/?(\?|$)/, /^avances\/por-secretaria\/?(\?|$)/,
   /^proyecto-area\/?(\?|$)/, /^proyecto-equipo\/?(\?|$)/,
   /^etapas\/?(\?|$)/, /^historial\/?(\?|$)/,
@@ -38,7 +39,8 @@ function isCacheable(url: string): boolean {
 const originalGet = api.get.bind(api)
 api.get = function (url: string, config?: { params?: Record<string, unknown> }) {
   const key = cacheKey(url, config?.params)
-  const entry = cache.get(key)
+  const canUseCache = isCacheable(url)
+  const entry = canUseCache ? cache.get(key) : undefined
   if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
     return Promise.resolve({
       data: entry.data,
@@ -49,7 +51,8 @@ api.get = function (url: string, config?: { params?: Record<string, unknown> }) 
     })
   }
   return originalGet(url, config).then((res) => {
-    if (isCacheable(url)) cache.set(key, { data: res.data, timestamp: Date.now() })
+    if (canUseCache) cache.set(key, { data: res.data, timestamp: Date.now() })
+    else cache.delete(key)
     return res
   })
 } as typeof api.get

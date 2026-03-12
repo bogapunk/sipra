@@ -48,6 +48,13 @@ class Tarea(models.Model):
     def __str__(self):
         return self.titulo
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["estado", "fecha_vencimiento"], name="tarea_estado_venc_idx"),
+            models.Index(fields=["responsable", "estado"], name="tarea_resp_estado_idx"),
+            models.Index(fields=["proyecto", "tarea_padre", "orden"], name="tarea_proj_padre_ord_idx"),
+        ]
+
 
 class HistorialTarea(models.Model):
     tarea = models.ForeignKey("Tarea", on_delete=models.CASCADE, related_name="historial")

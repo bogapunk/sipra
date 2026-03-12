@@ -94,16 +94,133 @@ const todasLasTareas = computed(() => {
 })
 
 const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
+const resumenAvances = computed(() => {
+  const tareas = todasLasTareas.value
+  const actualizadas = tareas.filter((t) => t.ultimo_incremento != null).length
+  return [
+    { key: 'secretarias', title: 'Secretarias visibles', value: secretariasFiltradas.value.length, meta: 'Grupos incluidos en la vista', tone: 'neutral' },
+    { key: 'tareas', title: 'Tareas visibles', value: tareas.length, meta: 'Tareas consideradas en el resumen', tone: 'info' },
+    { key: 'avance', title: 'Avance promedio', value: `${avanceGlobal.value.toFixed(1)}%`, meta: 'Promedio general consolidado', tone: 'success' },
+    { key: 'actualizadas', title: 'Con actualizacion', value: actualizadas, meta: 'Tareas con ultimo incremento registrado', tone: 'warning' },
+  ]
+})
+
+async function exportarReporte() {
+  const {
+    addImageFromDataUrl,
+    addKeyValueRows,
+    addReportHeader,
+    addTable,
+    createDonutChartDataUrl,
+    createHorizontalBarChartDataUrl,
+    createWorkbook,
+    saveWorkbook,
+  } = await import('@/utils/exportWorkbook')
+  const workbook = await createWorkbook('Avances por secretaria')
+  const resumen = workbook.addWorksheet('Resumen')
+  let row = addReportHeader(
+    resumen,
+    'Avances por secretaria',
+    'Reporte completo con resumen, graficos y detalle de tareas.',
+  )
+  row = addKeyValueRows(resumen, [
+    ['Fecha de exportacion', new Date().toLocaleString('es-CL')],
+    ['Busqueda aplicada', buscarSecretaria.value || 'Sin filtro'],
+    ['Secretarias visibles', secretariasFiltradas.value.length],
+    ['Tareas visibles', todasLasTareas.value.length],
+    ['Avance promedio', `${avanceGlobal.value.toFixed(1)}%`],
+  ], row)
+  addTable(
+    resumen,
+    ['Secretaria', 'Tareas', 'Avance promedio %'],
+    secretariasFiltradas.value.map((grupo) => [
+      grupo.secretaria,
+      grupo.tareas?.length || 0,
+      avancePromedioGrupo(grupo.tareas || []).toFixed(1),
+    ]),
+    row,
+  )
+
+  const graficos = workbook.addWorksheet('Graficos')
+  let chartRow = addReportHeader(graficos, 'Graficos de avances por secretaria')
+  const donutGlobal = createDonutChartDataUrl('Avance general consolidado', avanceGlobal.value)
+  if (donutGlobal) {
+    await addImageFromDataUrl(graficos, donutGlobal, `A${chartRow}:F${chartRow + 14}`)
+    chartRow += 16
+  }
+  const barrasGlobal = createHorizontalBarChartDataUrl(
+    'Avance por tarea (todas las secretarias)',
+    todasLasTareas.value.map((t) => ({
+      label: String(t.titulo || t.proyecto_nombre || 'Tarea'),
+      value: Number(t.porcentaje_avance) || 0,
+    })),
+    { maxItems: 15 },
+  )
+  if (barrasGlobal) {
+    await addImageFromDataUrl(graficos, barrasGlobal, `A${chartRow}:I${chartRow + 18}`)
+    chartRow += 20
+  }
+  for (const grupo of secretariasFiltradas.value) {
+    const donut = createDonutChartDataUrl(`Secretaria: ${grupo.secretaria}`, avancePromedioGrupo(grupo.tareas || []))
+    const barras = createHorizontalBarChartDataUrl(
+      `Avance por tarea - ${grupo.secretaria}`,
+      (grupo.tareas || []).map((t) => ({
+        label: String(t.titulo || t.proyecto_nombre || 'Tarea'),
+        value: Number(t.porcentaje_avance) || 0,
+      })),
+      { maxItems: 12 },
+    )
+    if (donut) {
+      await addImageFromDataUrl(graficos, donut, `A${chartRow}:F${chartRow + 14}`)
+      chartRow += 16
+    }
+    if (barras) {
+      await addImageFromDataUrl(graficos, barras, `A${chartRow}:I${chartRow + 18}`)
+      chartRow += 20
+    }
+  }
+
+  const detalle = workbook.addWorksheet('Detalle de tareas')
+  const detalleRow = addReportHeader(detalle, 'Detalle de tareas por secretaria')
+  addTable(
+    detalle,
+    ['Secretaria', 'Tarea', 'Proyecto', 'Estado', 'Avance %', 'Ultimo incremento %', 'Fecha ultima actualizacion'],
+    secretariasFiltradas.value.flatMap((grupo) =>
+      (grupo.tareas || []).map((t) => [
+        grupo.secretaria,
+        String(t.titulo || ''),
+        String(t.proyecto_nombre || ''),
+        String(t.estado || ''),
+        Number(t.porcentaje_avance) || 0,
+        t.ultimo_incremento == null ? '-' : Number(t.ultimo_incremento),
+        String(t.fecha_ultima_actualizacion || ''),
+      ]),
+    ),
+    detalleRow,
+  )
+
+  await saveWorkbook(workbook, `avances_por_secretaria_${new Date().toISOString().slice(0, 10)}.xlsx`)
+}
 </script>
 
 <template>
   <div class="page avances-ejecutivo">
-    <header class="page-header">
-      <h1>Avances por secretaría</h1>
-      <p class="subtitle">
-        Vista ejecutiva: avance actual e incrementos realizados en cada tarea por secretaría
-      </p>
+    <header class="page-header hero-card">
+      <div>
+        <h1>Avances por secretaría</h1>
+        <p class="subtitle">
+          Vista ejecutiva del avance actual y de los incrementos registrados en cada tarea por secretaría.
+        </p>
+      </div>
     </header>
+
+    <section class="summary-grid">
+      <article v-for="card in resumenAvances" :key="card.key" class="summary-card" :class="`tone-${card.tone}`">
+        <span class="summary-title">{{ card.title }}</span>
+        <strong class="summary-value">{{ card.value }}</strong>
+        <span class="summary-meta">{{ card.meta }}</span>
+      </article>
+    </section>
 
     <div class="toolbar-avances">
       <div class="search-wrapper">
@@ -128,6 +245,9 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
           {{ secretariasFiltradas.length }} secretaría(s) · {{ todasLasTareas.length }} tarea(s)
         </span>
       </div>
+      <button type="button" class="btn-exportar" @click="exportarReporte" :disabled="carga || !secretariasFiltradas.length">
+        Exportar reporte
+      </button>
     </div>
 
     <LoaderSpinner v-if="carga" texto="Cargando avances por secretaría..." />
@@ -175,6 +295,10 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
           {{ grupo.secretaria }}
           <span class="area-badge">{{ grupo.tareas?.length || 0 }} tareas</span>
         </h2>
+        <div class="area-resumen">
+          <span class="area-resumen-chip">Avance promedio: {{ avancePromedioGrupo(grupo.tareas || []).toFixed(1) }}%</span>
+          <span class="area-resumen-chip">Con actualizacion: {{ (grupo.tareas || []).filter((t) => t.ultimo_incremento != null).length }}</span>
+        </div>
 
         <div class="tareas-grid">
           <div
@@ -287,7 +411,14 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
   margin: 0 auto;
 }
 .page-header {
-  margin-bottom: 2rem;
+  margin-bottom: 0;
+}
+.hero-card {
+  padding: 1.35rem 1.5rem;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
 }
 .page-header h1 {
   font-size: 1.75rem;
@@ -299,8 +430,54 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
   font-size: 1rem;
   margin: 0;
 }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.summary-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.summary-title { font-size: 0.9rem; color: #64748b; }
+.summary-value { font-size: 1.9rem; line-height: 1; color: #0f172a; }
+.summary-meta { font-size: 0.85rem; color: #64748b; }
+.tone-neutral { border-top: 4px solid #2563eb; }
+.tone-info { border-top: 4px solid #0ea5e9; }
+.tone-success { border-top: 4px solid #16a34a; }
+.tone-warning { border-top: 4px solid #f59e0b; }
 .toolbar-avances {
   margin-bottom: 1.5rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 1rem 1.1rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+.btn-exportar {
+  border: none;
+  border-radius: 10px;
+  background: #2563eb;
+  color: white;
+  padding: 0.7rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-exportar:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .search-wrapper {
   position: relative;
@@ -430,8 +607,9 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
 .area-panel {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
   overflow: hidden;
+  border: 1px solid #e2e8f0;
 }
 .area-titulo {
   font-size: 1.1rem;
@@ -453,6 +631,22 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
   background: rgba(255,255,255,0.2);
   padding: 0.2rem 0.5rem;
   border-radius: 6px;
+}
+.area-resumen {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.25rem 0;
+}
+.area-resumen-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 .tareas-grid {
   display: grid;
@@ -648,4 +842,10 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
   font-size: 0.95rem;
 }
 .btn-cerrar:hover { background: #cbd5e1; }
+@media (max-width: 1100px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .summary-grid { grid-template-columns: 1fr; }
+}
 </style>

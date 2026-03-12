@@ -35,6 +35,11 @@ const areasSeleccionadasAsignar = ref<number[]>([])
 const secretariaSeleccionadaAsignar = ref<number | null>(null)
 const guardandoAsignar = ref(false)
 const buscarProyecto = ref('')
+const paginaActual = ref(1)
+const tamanioPagina = 20
+const totalProyectos = ref(0)
+const soporteCargado = ref(false)
+let busquedaTimer: ReturnType<typeof setTimeout> | null = null
 type TipoDependencia = 'area' | 'secretaria'
 const form = ref({
   nombre: '',
@@ -63,26 +68,79 @@ function parseProyectos(res: unknown): Record<string, unknown>[] {
   return []
 }
 
-const load = async () => {
+function parseCountFromResponse(res: unknown): number {
+  if (!res || typeof res !== 'object') return 0
+  const raw = (res as { data?: unknown }).data
+  if (raw && typeof raw === 'object' && 'count' in (raw as object)) {
+    const count = Number((raw as { count?: unknown }).count)
+    return Number.isFinite(count) ? count : 0
+  }
+  return Array.isArray(raw) ? raw.length : 0
+}
+
+function hasNextPage(res: unknown): boolean {
+  if (!res || typeof res !== 'object') return false
+  const raw = (res as { data?: unknown }).data
+  return Boolean(raw && typeof raw === 'object' && 'next' in (raw as object) && (raw as { next?: unknown }).next)
+}
+
+function buildProjectParams(page = paginaActual.value): Record<string, string | number> {
+  const secretariaId = route.query.secretaria as string | undefined
+  const areaId = route.query.area as string | undefined
+  const estado = route.query.estado as string | undefined
+  const vencimiento = route.query.vencimiento as string | undefined
+  const params: Record<string, string | number> = {
+    page,
+    page_size: tamanioPagina,
+  }
+  if (secretariaId) params.secretaria = secretariaId
+  if (areaId) params.area = areaId
+  if (estado) params.estado = estado
+  if (vencimiento) params.vencimiento = vencimiento
+  if (buscarProyecto.value.trim()) params.search = buscarProyecto.value.trim()
+  return params
+}
+
+async function fetchAllPages(
+  endpoint: string,
+  baseParams: Record<string, string | number> = {},
+): Promise<Record<string, unknown>[]> {
+  const acumulado: Record<string, unknown>[] = []
+  let page = 1
+  while (true) {
+    const res = await api.get(endpoint, { params: { ...baseParams, page, page_size: 100 } })
+    acumulado.push(...parseProyectos(res))
+    if (!hasNextPage(res)) break
+    page += 1
+  }
+  return acumulado
+}
+
+async function cargarDatosSoporte() {
+  if (soporteCargado.value) return
+  const [uRes, sRes, aRes] = await Promise.all([
+    api.get('usuarios/selector/').catch(() => ({ data: [] })),
+    api.get('secretarias/').catch(() => ({ data: [] })),
+    api.get('areas/').catch(() => ({ data: [] })),
+  ])
+  usuarios.value = Array.isArray(uRes.data) ? uRes.data : []
+  secretarias.value = Array.isArray(sRes.data) ? sRes.data : []
+  areas.value = Array.isArray(aRes.data) ? aRes.data : []
+  soporteCargado.value = true
+}
+
+const load = async (page = paginaActual.value) => {
   carga.value = true
   try {
-    const secretariaId = route.query.secretaria as string | undefined
-    const params = secretariaId ? { secretaria: secretariaId } : {}
-    const [pRes, uRes, sRes, aRes] = await Promise.all([
-      api.get('dashboard/proyectos/', { params }).catch(() => api.get('proyectos/', { params })),
-      api.get('usuarios/selector/').catch(() => ({ data: [] })),
-      api.get('secretarias/').catch(() => ({ data: [] })),
-      api.get('areas/').catch(() => ({ data: [] })),
-    ])
+    paginaActual.value = page
+    const pRes = await api.get('dashboard/proyectos/', { params: buildProjectParams(page) }).catch(
+      () => api.get('proyectos/', { params: buildProjectParams(page) }),
+    )
     proyectos.value = parseProyectos(pRes)
-    usuarios.value = Array.isArray(uRes.data) ? uRes.data : []
-    secretarias.value = Array.isArray(sRes.data) ? sRes.data : []
-    areas.value = Array.isArray(aRes.data) ? aRes.data : []
+    totalProyectos.value = parseCountFromResponse(pRes)
   } catch {
     proyectos.value = []
-    usuarios.value = []
-    secretarias.value = []
-    areas.value = []
+    totalProyectos.value = 0
   } finally {
     carga.value = false
   }
@@ -95,14 +153,65 @@ const secretariaFiltroNombre = computed(() => {
   return s ? `${(s.codigo as string) || ''} - ${(s.nombre as string) || ''}` : null
 })
 
-const proyectosFiltrados = computed(() => {
-  const ordenados = [...proyectos.value].sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
-  const q = buscarProyecto.value.trim().toLowerCase()
-  if (!q) return ordenados
-  return ordenados.filter((p: Record<string, unknown>) =>
-    String(p.nombre || '').toLowerCase().includes(q)
-  )
+const areaFiltroNombre = computed(() => {
+  const id = route.query.area
+  if (!id) return null
+  const area = areas.value.find((x: Record<string, unknown>) => String(x.id) === id)
+  return area ? String(area.nombre || '') : null
 })
+
+const filtroRutaTexto = computed(() => {
+  const partes: string[] = []
+  if (secretariaFiltroNombre.value) partes.push(`Secretaría: ${secretariaFiltroNombre.value}`)
+  if (areaFiltroNombre.value) partes.push(`Área: ${areaFiltroNombre.value}`)
+  if (typeof route.query.estado === 'string' && route.query.estado) partes.push(`Estado: ${route.query.estado}`)
+  if (typeof route.query.vencimiento === 'string' && route.query.vencimiento) {
+    const map: Record<string, string> = {
+      'vencidos': 'Vencidos',
+      'proximos': 'Próximos 7 días',
+      'en-plazo': 'En plazo',
+    }
+    partes.push(`Vencimiento: ${map[route.query.vencimiento] || route.query.vencimiento}`)
+  }
+  return partes.join(' | ')
+})
+
+const proyectosFiltrados = computed(() => proyectos.value)
+
+const resumenProyectos = computed(() => {
+  const lista = proyectosFiltrados.value
+  const total = totalProyectos.value
+  const activos = lista.filter((p) => String(p.estado || '') === 'Activo').length
+  const finalizados = lista.filter((p) => String(p.estado || '') === 'Finalizado').length
+  const enPausa = lista.filter((p) => String(p.estado || '') === 'En pausa').length
+  const avancePromedio = total
+    ? Math.round(lista.reduce((acc, p) => acc + (Number(p.porcentaje_avance) || 0), 0) / total)
+    : 0
+  return [
+    { key: 'total', title: 'Proyectos visibles', value: total, meta: 'Coincidencias totales de la búsqueda', tone: 'neutral' },
+    { key: 'activos', title: 'Activos', value: activos, meta: `${enPausa} en pausa en esta página`, tone: 'info' },
+    { key: 'finalizados', title: 'Finalizados', value: finalizados, meta: 'Resultado de la página actual', tone: 'success' },
+    { key: 'avance', title: 'Avance promedio', value: `${avancePromedio}%`, meta: 'Promedio de la página actual', tone: 'warning' },
+  ]
+})
+
+const totalPaginas = computed(() => Math.max(1, Math.ceil(totalProyectos.value / tamanioPagina)))
+const primerResultado = computed(() => totalProyectos.value ? ((paginaActual.value - 1) * tamanioPagina) + 1 : 0)
+const ultimoResultado = computed(() => Math.min(totalProyectos.value, paginaActual.value * tamanioPagina))
+
+async function irAPagina(page: number) {
+  const destino = Math.min(Math.max(1, page), totalPaginas.value)
+  if (destino === paginaActual.value) return
+  await load(destino)
+}
+
+function estadoProyectoClase(estado: unknown): string {
+  const valor = String(estado || '').toLowerCase()
+  if (valor === 'activo') return 'estado-activo'
+  if (valor === 'finalizado') return 'estado-finalizado'
+  if (valor === 'en pausa') return 'estado-pausa'
+  return 'estado-neutro'
+}
 
 function dependenciaOrganizacional(p: Record<string, unknown>): { tipo: string; nombre: string }[] {
   const items: { tipo: string; nombre: string }[] = []
@@ -123,7 +232,7 @@ function dependenciaOrganizacional(p: Record<string, unknown>): { tipo: string; 
 }
 
 async function descargarExcel() {
-  const lista = proyectosFiltrados.value
+  const lista = await fetchAllPages('dashboard/proyectos/', buildProjectParams(1))
   const headers = ['Nombre', 'Dependencia organizacional', 'Avance %', 'Responsable', 'Estado', 'Fecha inicio', 'Fecha fin estimada', 'Descripción']
   const rows = lista.map((p: Record<string, unknown>) => {
     const deps = dependenciaOrganizacional(p)
@@ -412,17 +521,42 @@ watch(
   { deep: true }
 )
 
-onMounted(load)
-watch(() => route.query.secretaria, () => load())
+onMounted(async () => {
+  await Promise.all([cargarDatosSoporte(), load(1)])
+})
+
+watch(() => [route.query.secretaria, route.query.area, route.query.estado, route.query.vencimiento], () => {
+  void load(1)
+})
+
+watch(buscarProyecto, () => {
+  if (busquedaTimer) clearTimeout(busquedaTimer)
+  busquedaTimer = setTimeout(() => {
+    void load(1)
+  }, 300)
+})
 </script>
 
 <template>
   <div class="page">
-    <h1>Proyectos</h1>
-    <p v-if="route.query.secretaria && (secretariaFiltroNombre || secretarias.length)" class="filter-hint">
-      Mostrando proyectos de: <strong>{{ secretariaFiltroNombre || 'Secretaría' }}</strong>.
+    <div class="page-hero">
+      <div>
+        <h1>Proyectos</h1>
+        <p class="page-subtitle">Vista ejecutiva del portafolio con foco en avance, responsables y vencimientos.</p>
+      </div>
+    </div>
+    <p v-if="filtroRutaTexto" class="filter-hint">
+      Filtros aplicados: <strong>{{ filtroRutaTexto }}</strong>.
       <router-link :to="{ path: '/proyectos' }">Ver todos</router-link>
     </p>
+
+    <section class="summary-grid">
+      <article v-for="card in resumenProyectos" :key="card.key" class="summary-card" :class="`tone-${card.tone}`">
+        <span class="summary-title">{{ card.title }}</span>
+        <strong class="summary-value">{{ card.value }}</strong>
+        <span class="summary-meta">{{ card.meta }}</span>
+      </article>
+    </section>
 
     <div class="toolbar">
       <input
@@ -483,9 +617,18 @@ watch(() => route.query.secretaria, () => load())
               </template>
               <span v-else class="sin-dependencia">—</span>
             </td>
-            <td>{{ Number(p.porcentaje_avance) ?? 0 }}%</td>
+            <td class="avance-cell">
+              <div class="progress-inline">
+                <div class="progress-track">
+                  <div class="progress-fill" :style="{ width: `${Math.min(100, Number(p.porcentaje_avance) || 0)}%` }" />
+                </div>
+                <span class="progress-value">{{ Number(p.porcentaje_avance) ?? 0 }}%</span>
+              </div>
+            </td>
             <td>{{ p.responsable_nombre || p.creado_por || '-' }}</td>
-            <td>{{ p.estado || '-' }}</td>
+            <td>
+              <span class="estado-chip" :class="estadoProyectoClase(p.estado)">{{ p.estado || '-' }}</span>
+            </td>
             <td>{{ p.fecha_inicio || '-' }}</td>
             <td class="vencimiento-cell">
               <span v-if="p.fecha_fin_estimada" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(p.fecha_fin_estimada, p.estado)">
@@ -504,6 +647,20 @@ watch(() => route.query.secretaria, () => load())
           </tr>
         </tbody>
       </table>
+    </div>
+    <div v-if="proyectosFiltrados.length" class="pagination-bar">
+      <span class="pagination-text">
+        Mostrando {{ primerResultado }}-{{ ultimoResultado }} de {{ totalProyectos }} proyectos
+      </span>
+      <div class="pagination-actions">
+        <button type="button" class="btn-action" :disabled="paginaActual <= 1" @click="irAPagina(paginaActual - 1)">
+          Anterior
+        </button>
+        <span class="pagination-page">Página {{ paginaActual }} de {{ totalPaginas }}</span>
+        <button type="button" class="btn-action" :disabled="paginaActual >= totalPaginas" @click="irAPagina(paginaActual + 1)">
+          Siguiente
+        </button>
+      </div>
     </div>
 
     <EmptyState
@@ -721,20 +878,58 @@ watch(() => route.query.secretaria, () => load())
 </template>
 
 <style scoped>
-.page h1 { margin-bottom: 1rem; }
+.page { display: flex; flex-direction: column; gap: 1rem; }
+.page-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.35rem;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+}
+.page h1 { margin: 0 0 0.35rem; }
+.page-subtitle { margin: 0; color: #64748b; }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+.summary-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.summary-title { font-size: 0.9rem; color: #64748b; }
+.summary-value { font-size: 1.9rem; color: #0f172a; line-height: 1; }
+.summary-meta { color: #64748b; font-size: 0.85rem; }
+.tone-neutral { border-top: 4px solid #2563eb; }
+.tone-info { border-top: 4px solid #0ea5e9; }
+.tone-success { border-top: 4px solid #16a34a; }
+.tone-warning { border-top: 4px solid #f59e0b; }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
-  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
 }
 .search-input {
   flex: 1;
   min-width: 200px;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
   font-size: 0.9rem;
 }
 .toolbar-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -756,18 +951,35 @@ watch(() => route.query.secretaria, () => load())
   font-size: 0.9rem;
 }
 .btn-secondary:disabled { background: #94a3b8; cursor: not-allowed; }
-.table-wrapper { overflow-x: auto; }
+.table-wrapper {
+  overflow-x: auto;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+}
 .loading, .empty-msg { color: #64748b; margin-top: 0.5rem; }
 .table {
   width: 100%;
   background: white;
-  border-radius: 8px;
+  border-radius: 18px;
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
-.table th, .table td { padding: 0.75rem 1rem; text-align: left; }
-.table th { background: #f8fafc; font-weight: 600; }
-.table tbody tr:nth-child(even) { background: #f8fafc; }
+.table th, .table td {
+  padding: 0.9rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+  vertical-align: middle;
+}
+.table th {
+  background: #f8fafc;
+  font-weight: 700;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+.table tbody tr:hover { background: #f8fbff; }
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
 .modal-overlay {
@@ -812,7 +1024,56 @@ watch(() => route.query.secretaria, () => load())
 .hint { font-size: 0.85rem; color: #64748b; margin: 0; }
 .select-multiple { min-height: 80px; }
 .filter-hint { font-size: 0.9rem; color: #64748b; margin-bottom: 0.5rem; }
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+}
+.pagination-text {
+  color: #64748b;
+  font-size: 0.92rem;
+}
+.pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.pagination-page {
+  min-width: 145px;
+  text-align: center;
+  color: #0f172a;
+  font-weight: 600;
+}
 .dependencia-cell { min-width: 180px; }
+.avance-cell { min-width: 190px; }
+.progress-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.progress-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #0ea5e9);
+  border-radius: 999px;
+}
+.progress-value {
+  min-width: 2.8rem;
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 0.88rem;
+}
 .dependencia-badge {
   display: inline-block;
   padding: 0.25rem 0.5rem;
@@ -829,6 +1090,18 @@ watch(() => route.query.secretaria, () => load())
   background: #fce7f3;
   color: #9d174d;
 }
+.estado-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.estado-activo { background: #dbeafe; color: #1d4ed8; }
+.estado-finalizado { background: #dcfce7; color: #15803d; }
+.estado-pausa { background: #fef3c7; color: #a16207; }
+.estado-neutro { background: #e2e8f0; color: #475569; }
 .sin-dependencia { color: #94a3b8; }
 a { color: #3b82f6; text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -932,4 +1205,11 @@ a:hover { text-decoration: underline; }
 .leyenda-item.vencida::before { background: #dc2626; }
 .leyenda-item.proxima::before { background: #eab308; }
 .leyenda-item.dentro::before { background: #22c55e; }
+@media (max-width: 1100px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .page-hero { padding: 1rem; }
+}
 </style>

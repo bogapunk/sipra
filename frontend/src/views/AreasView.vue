@@ -39,6 +39,15 @@ const areasFiltradas = computed(() => {
   )
 })
 
+const resumenAreas = computed(() => {
+  const total = areasFiltradas.value.length
+  const activas = areasFiltradas.value.filter((a) => a.estado !== false).length
+  return [
+    { key: 'total', title: 'Areas visibles', value: total, meta: 'Resultado actual de la vista', tone: 'neutral' },
+    { key: 'activas', title: 'Activas', value: activas, meta: `${Math.max(0, total - activas)} inactivas`, tone: 'success' },
+  ]
+})
+
 async function descargarExcel() {
   const lista = areasFiltradas.value
   const headers = ['Nombre', 'Descripción', 'Estado']
@@ -122,8 +131,22 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <h1>Áreas</h1>
-    <div class="toolbar">
+    <div class="page-hero">
+      <div>
+        <h1>Áreas</h1>
+        <p class="page-subtitle">Gestión y consulta de áreas con una vista consistente del catálogo organizacional.</p>
+      </div>
+    </div>
+
+    <section class="summary-grid areas-summary">
+      <article v-for="card in resumenAreas" :key="card.key" class="summary-card" :class="`tone-${card.tone}`">
+        <span class="summary-title">{{ card.title }}</span>
+        <strong class="summary-value">{{ card.value }}</strong>
+        <span class="summary-meta">{{ card.meta }}</span>
+      </article>
+    </section>
+
+    <div class="toolbar toolbar-card">
       <input
         v-model="buscarArea"
         type="search"
@@ -148,8 +171,8 @@ onMounted(load)
       :mensaje="buscarArea.trim() ? 'No se encontraron áreas que coincidan con la búsqueda. Intente con otros términos.' : 'Aún no hay áreas cargadas. Use el botón «Nueva área» para crear la primera.'"
       :icono="buscarArea.trim() ? 'busqueda' : 'lista'"
     />
-    <div v-else class="table-wrapper">
-      <table class="table">
+    <div v-else class="table-wrapper app-table-wrapper">
+      <table class="table app-table">
       <thead>
         <tr>
           <th>Nombre</th>
@@ -160,7 +183,11 @@ onMounted(load)
       <tbody>
         <tr v-for="a in areasFiltradas" :key="(a.id as number)">
           <td>{{ a.nombre }}</td>
-          <td>{{ a.estado ? 'Activo' : 'Inactivo' }}</td>
+          <td>
+            <span class="status-chip" :class="a.estado ? 'status-active' : 'status-inactive'">
+              {{ a.estado ? 'Activo' : 'Inactivo' }}
+            </span>
+          </td>
           <td class="actions-cell">
             <button class="btn-action" title="Ver" @click="openVer(a)"><IconEye class="btn-icon-sm" /> Ver</button>
             <button class="btn-action" title="Editar" @click="openEdit(a)"><IconEdit class="btn-icon-sm" /> Editar</button>
@@ -173,20 +200,20 @@ onMounted(load)
 
     <!-- Modal Ver detalle área -->
     <div v-if="showVerModal && areaVer" class="modal-overlay" @click.self="closeVerModal">
-      <div class="modal modal-ver">
+      <div class="modal modal-ver app-modal app-modal-md">
         <h2>Detalle del área</h2>
-        <div class="detalle-content">
-          <div class="detalle-row">
-            <span class="detalle-label">Nombre</span>
-            <span class="detalle-valor">{{ areaVer.nombre || '-' }}</span>
+        <div class="detalle-content app-detail-content">
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Nombre</span>
+            <span class="detalle-valor app-detail-value">{{ areaVer.nombre || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Descripción</span>
-            <p class="detalle-valor detalle-desc">{{ areaVer.descripcion || '-' }}</p>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Descripción</span>
+            <p class="detalle-valor detalle-desc app-detail-value app-detail-desc">{{ areaVer.descripcion || '-' }}</p>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Estado</span>
-            <span class="detalle-valor">{{ areaVer.estado !== false ? 'Activo' : 'Inactivo' }}</span>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Estado</span>
+            <span class="detalle-valor app-detail-value">{{ areaVer.estado !== false ? 'Activo' : 'Inactivo' }}</span>
           </div>
         </div>
         <div class="modal-actions">
@@ -196,20 +223,21 @@ onMounted(load)
     </div>
 
     <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
-      <div class="modal">
+      <div class="modal app-modal app-modal-sm">
         <h2>{{ editingId ? 'Editar' : 'Nueva' }} área</h2>
-        <form @submit.prevent="save">
+        <form class="app-form" @submit.prevent="save">
           <label>Nombre <span class="required">*</span></label>
           <input
             v-model="form.nombre"
             placeholder="Nombre"
+            class="app-input"
             :class="{ 'input-error': errorNombre }"
             @blur="validarNombre"
           />
           <span v-if="errorNombre" class="error-msg">{{ errorNombre }}</span>
           <label>Descripción</label>
-          <textarea v-model="form.descripcion" placeholder="Descripción" rows="3" />
-          <label class="checkbox">
+          <textarea v-model="form.descripcion" class="app-textarea" placeholder="Descripción" rows="3" />
+          <label class="checkbox app-checkbox">
             <input v-model="form.estado" type="checkbox" />
             Activo
           </label>
@@ -224,49 +252,22 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page h1 { margin-bottom: 1rem; }
+.page { display: flex; flex-direction: column; gap: 1rem; }
+.page h1 { margin: 0; }
+.areas-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
-  margin-bottom: 1rem;
 }
 .search-input {
   flex: 1;
   min-width: 200px;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
   font-size: 0.9rem;
 }
 .toolbar-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: stretch; }
-.toolbar-buttons .btn-secondary,
-.toolbar-buttons .btn-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  height: 38px;
-  padding: 0 1rem;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  border: none;
-  box-sizing: border-box;
-}
-.toolbar-buttons .btn-secondary {
-  background: #16a34a;
-  color: white;
-}
-.toolbar-buttons .btn-secondary:disabled { background: #94a3b8; cursor: not-allowed; }
-.toolbar-buttons .btn-primary {
-  background: #3b82f6;
-  color: white;
-}
-.table { width: 100%; background: white; border-radius: 8px; overflow: hidden; }
-.table th, .table td { padding: 0.75rem 1rem; text-align: left; }
-.table th { background: #f8fafc; }
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
 .modal-overlay {
@@ -278,27 +279,11 @@ onMounted(load)
   justify-content: center;
   z-index: 100;
 }
-.modal {
-  background: white;
-  padding: 1.5rem;
-  border-radius: 10px;
-  max-width: 400px;
-  width: 90%;
-}
-.modal form { display: flex; flex-direction: column; gap: 0.5rem; }
-.modal input, .modal select, .modal textarea {
-  padding: 0.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-}
 .checkbox { display: flex; align-items: center; gap: 0.5rem; }
-.modal-ver { max-width: 480px; }
-.detalle-content { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem; }
-.detalle-row { display: flex; flex-direction: column; gap: 0.25rem; }
-.detalle-label { font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
-.detalle-valor { font-size: 0.95rem; color: #1e293b; }
-.detalle-desc { white-space: pre-wrap; line-height: 1.5; margin: 0; }
 .required { color: #dc2626; }
 .input-error { border-color: #dc2626 !important; }
 .error-msg { font-size: 0.85rem; color: #dc2626; margin-top: -0.25rem; }
+@media (max-width: 700px) {
+  .areas-summary { grid-template-columns: 1fr; }
+}
 </style>

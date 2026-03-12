@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '@/services/api'
+import { api, invalidateApiCache } from '@/services/api'
 import { exportToCsv } from '@/utils/exportCsv'
 import IconDownload from '@/components/icons/IconDownload.vue'
 import IconPlus from '@/components/icons/IconPlus.vue'
@@ -53,6 +53,9 @@ const secretariaAsignar = ref<number | null>(null)
 const guardandoAsignar = ref(false)
 const filtroEstado = ref('')
 const buscarTitulo = ref('')
+const tareasPadreOptions = ref<Record<string, unknown>[]>([])
+const soporteCargado = ref(false)
+const ESTADOS_VALIDOS = new Set(['Pendiente', 'En proceso', 'Finalizada', 'Bloqueada'])
 const form = ref({
   proyecto: null as number | null,
   tarea_padre: null as number | null,
@@ -78,33 +81,81 @@ function parseListResponse(payload: unknown): Record<string, unknown>[] {
   return []
 }
 
+function hasNextPage(payload: unknown): boolean {
+  return Boolean(
+    payload && typeof payload === 'object' && 'next' in (payload as object) && (payload as { next?: unknown }).next
+  )
+}
+
+async function fetchAllTareas(): Promise<Record<string, unknown>[]> {
+  // Intento 1: sin params → backend devuelve lista plana completa (OptInPageNumberPagination)
+  try {
+    const res = await api.get('tareas/')
+    const data = res.data
+    if (Array.isArray(data)) return data as Record<string, unknown>[]
+    const lista = parseListResponse(data)
+    if (lista.length > 0) return lista
+  } catch {
+    // seguir al intento 2
+  }
+  // Intento 2: con paginación explícita
+  const acumulado: Record<string, unknown>[] = []
+  let page = 1
+  while (true) {
+    const res = await api.get('tareas/', { params: { page, page_size: 200 } })
+    const data = res.data
+    acumulado.push(...parseListResponse(data))
+    if (!hasNextPage(data)) break
+    page += 1
+  }
+  return acumulado
+}
+
 async function cargarProyectosParaSelector() {
   try {
-    const res = await api.get('dashboard/proyectos/')
-    proyectos.value = parseListResponse(res.data)
-  } catch {
     const res = await api.get('proyectos/')
     proyectos.value = parseListResponse(res.data)
+  } catch {
+    proyectos.value = []
   }
 }
 
-const load = async () => {
-  const params: Record<string, string | number> = {}
-  if (filtroEstado.value) params.estado = filtroEstado.value
-  const [t, a, s, uRes] = await Promise.all([
-    api.get('tareas/', { params }),
-    api.get('areas/', { params: { estado: 'true' } }),
-    api.get('secretarias/', { params: { activa: 'true' } }),
+async function cargarTareasPadreSelector() {
+  try {
+    const res = await api.get('tareas/', { params: { solo_raices: 1 } })
+    tareasPadreOptions.value = parseListResponse(res.data)
+  } catch {
+    tareasPadreOptions.value = []
+  }
+}
+
+async function cargarDatosSoporte() {
+  if (soporteCargado.value) return
+  const [a, s, uRes] = await Promise.all([
+    api.get('areas/', { params: { estado: 'true' } }).catch(() => ({ data: [] })),
+    api.get('secretarias/', { params: { activa: 'true' } }).catch(() => ({ data: [] })),
     api.get('usuarios/selector/').catch(() => api.get('usuarios/').then(r => ({
       data: Array.isArray(r.data) ? r.data : (r.data?.results ?? []),
     })).catch(() => ({ data: [] }))),
   ])
-  tareas.value = parseListResponse(t.data)
   areas.value = parseListResponse(a.data)
   secretarias.value = parseListResponse(s.data)
   usuarios.value = parseListResponse(uRes.data)
-  await cargarProyectosParaSelector()
+  soporteCargado.value = true
 }
+
+const load = async () => {
+  invalidateApiCache('tareas')
+  try {
+    tareas.value = await fetchAllTareas()
+  } catch {
+    tareas.value = []
+  }
+}
+
+const filtroRutaTexto = computed(() => {
+  return ''
+})
 
 async function loadUsuariosParaResponsable() {
   if (!showForm.value) return
@@ -136,7 +187,7 @@ watch(
 
 const openCreate = async () => {
   editingId.value = null
-  await cargarProyectosParaSelector()
+  await Promise.all([cargarProyectosParaSelector(), cargarTareasPadreSelector()])
   tipoOrganizacion.value = 'area'
   form.value = {
     proyecto: null,
@@ -157,8 +208,9 @@ const openCreate = async () => {
   loadUsuariosParaResponsable()
 }
 
-const openEdit = (t: Record<string, unknown>) => {
+const openEdit = async (t: Record<string, unknown>) => {
   editingId.value = t.id as number
+  await Promise.all([cargarProyectosParaSelector(), cargarTareasPadreSelector()])
   const areaId = t.area ? (typeof t.area === 'object' ? (t.area as { id?: number }).id : t.area) : null
   const secretariaId = t.secretaria ? (typeof t.secretaria === 'object' ? (t.secretaria as { id?: number }).id : t.secretaria) : null
   tipoOrganizacion.value = secretariaId ? 'secretaria' : (areaId ? 'area' : 'ninguna')
@@ -499,70 +551,156 @@ const ESTADOS = [
 ] as const
 
 const tareasFiltradas = computed(() => {
-  const lista = tareas.value
   const q = buscarTitulo.value.trim().toLowerCase()
-  if (!q) return lista
-  return lista.filter((t: Record<string, unknown>) =>
-    String(t.titulo || '').toLowerCase().includes(q)
-  )
+  const estado = filtroEstado.value
+  return tareas.value.filter((t: Record<string, unknown>) => {
+    const titulo = String(t.titulo || '').toLowerCase()
+    const okTitulo = !q || titulo.includes(q)
+    const okEstado = !estado || !ESTADOS_VALIDOS.has(estado) || String(t.estado || '') === estado
+    return okTitulo && okEstado
+  })
 })
 
-const tareasRaiz = computed(() =>
-  tareas.value.filter((t: Record<string, unknown>) => !t.tarea_padre)
-)
+const resumenTareas = computed(() => {
+  const lista = tareasFiltradas.value
+  const total = lista.length
+  const pendientes = lista.filter((t) => String(t.estado || '') === 'Pendiente').length
+  const enProceso = lista.filter((t) => String(t.estado || '') === 'En proceso').length
+  const bloqueadas = lista.filter((t) => String(t.estado || '') === 'Bloqueada').length
+  const avancePromedio = total
+    ? Math.round(lista.reduce((acc, t) => acc + (Number(t.porcentaje_avance) || 0), 0) / total)
+    : 0
+  return [
+    { key: 'total', title: 'Tareas visibles', value: total, meta: 'Coincidencias totales de la búsqueda', tone: 'neutral' },
+    { key: 'pendientes', title: 'Pendientes', value: pendientes, meta: `${enProceso} en proceso`, tone: 'warning' },
+    { key: 'bloqueadas', title: 'Bloqueadas', value: bloqueadas, meta: 'Requieren seguimiento', tone: 'danger' },
+    { key: 'avance', title: 'Avance promedio', value: `${avancePromedio}%`, meta: 'Promedio de las tareas visibles', tone: 'info' },
+  ]
+})
+
+function estadoTareaClase(estado: unknown): string {
+  const valor = String(estado || '').toLowerCase()
+  if (valor === 'pendiente') return 'estado-pendiente'
+  if (valor === 'en proceso') return 'estado-proceso'
+  if (valor === 'finalizada') return 'estado-finalizada'
+  if (valor === 'bloqueada') return 'estado-bloqueada'
+  return 'estado-neutro'
+}
+
+function prioridadClase(prioridad: unknown): string {
+  const valor = String(prioridad || '').toLowerCase()
+  if (valor === 'alta') return 'prioridad-alta'
+  if (valor === 'media') return 'prioridad-media'
+  if (valor === 'baja') return 'prioridad-baja'
+  return 'prioridad-neutra'
+}
 
 const tareasParaTabla = computed(() => {
-  const lista = tareasFiltradas.value
+  const lista = tareasFiltradas.value.filter((t) => t != null && t.id != null)
   const resultado: { tarea: Record<string, unknown>; esSubtarea: boolean }[] = []
   const idsIncluidos = new Set<number>()
-  const raices = lista.filter((t: Record<string, unknown>) => !t.tarea_padre)
+  const hijosPorPadre = new Map<number, Record<string, unknown>[]>()
+  const ordenar = (items: Record<string, unknown>[]) =>
+    [...items].sort((a, b) => {
+      const ordenA = Number(a.orden ?? 0)
+      const ordenB = Number(b.orden ?? 0)
+      if (ordenA !== ordenB) return ordenA - ordenB
+      return Number(a.id ?? 0) - Number(b.id ?? 0)
+    })
+  for (const t of lista) {
+    const raw = t.tarea_padre
+    const padreId = raw == null
+      ? 0
+      : typeof raw === 'object' && raw !== null
+        ? Number((raw as { id?: number }).id ?? 0)
+        : Number(raw ?? 0)
+    if (!padreId) continue
+    const hijos = hijosPorPadre.get(padreId) || []
+    hijos.push(t)
+    hijosPorPadre.set(padreId, hijos)
+  }
+  const raices = ordenar(lista.filter((t: Record<string, unknown>) => !t.tarea_padre))
   for (const t of raices) {
     resultado.push({ tarea: t, esSubtarea: false })
     idsIncluidos.add(t.id as number)
-    const hijos = (t.subtareas as Record<string, unknown>[]) || []
+    const hijos = ordenar(hijosPorPadre.get(Number(t.id)) || [])
     for (const h of hijos) {
       resultado.push({ tarea: h, esSubtarea: true })
       idsIncluidos.add(h.id as number)
     }
   }
+  // Seguridad: cualquier tarea que no entró al árbol (padre huérfano) se agrega al final
   for (const t of lista) {
-    if (t.tarea_padre && !idsIncluidos.has(t.id as number)) {
-      resultado.push({ tarea: t, esSubtarea: true })
+    if (!idsIncluidos.has(t.id as number)) {
+      resultado.push({ tarea: t, esSubtarea: Boolean(t.tarea_padre) })
     }
   }
   return resultado
 })
 
 const tareasParaPadre = computed(() => {
-  const raices = tareasRaiz.value
+  const raices = tareasPadreOptions.value
   const id = editingId.value
   if (!id) return raices
   return raices.filter((t: Record<string, unknown>) => (t.id as number) !== id)
 })
 
-onMounted(async () => {
-  await load()
+async function abrirDetalleDesdeRuta() {
   const verId = route.query.ver
-  if (verId) {
-    const id = Number(verId)
-    if (id) {
-      try {
-        const res = await api.get(`tareas/${id}/`)
-        const t = res.data as Record<string, unknown>
-        openVer(t)
-        router.replace({ path: '/tareas', query: {} })
-      } catch {
-        toast.error('No se pudo cargar el detalle de la tarea.')
-      }
-    }
+  if (!verId) return
+  const id = Number(verId)
+  if (!id) return
+  try {
+    const res = await api.get(`tareas/${id}/`)
+    const t = res.data as Record<string, unknown>
+    openVer(t)
+    const nextQuery = { ...route.query }
+    delete nextQuery.ver
+    router.replace({ path: '/tareas', query: nextQuery })
+  } catch {
+    toast.error('No se pudo cargar el detalle de la tarea.')
   }
+}
+
+function limpiarFiltros() {
+  filtroEstado.value = ''
+  buscarTitulo.value = ''
+}
+
+onMounted(async () => {
+  limpiarFiltros()
+  // Carga soporte en paralelo (sin bloquear la carga principal)
+  Promise.all([cargarDatosSoporte(), cargarProyectosParaSelector()]).catch(() => undefined)
+  // Carga principal — no bloqueada por el soporte
+  await load()
+  await abrirDetalleDesdeRuta()
+})
+
+watch(() => route.query.ver, async () => {
+  await abrirDetalleDesdeRuta()
 })
 </script>
 
 <template>
   <div class="page">
-    <h1>Tareas</h1>
+    <div class="page-hero">
+      <div>
+        <h1>Tareas</h1>
+        <p class="page-subtitle">Seguimiento operativo con foco en estado, prioridad, avance y vencimientos.</p>
+      </div>
+    </div>
     <p v-if="isVisualizador" class="subtitle-rol">Vista de solo lectura: puede consultar y exportar todas las tareas del sistema.</p>
+    <p v-if="filtroRutaTexto" class="filter-hint">
+      Filtros aplicados: <strong>{{ filtroRutaTexto }}</strong>.
+      <router-link :to="{ path: '/tareas' }">Ver todas</router-link>
+    </p>
+    <section class="summary-grid">
+      <article v-for="card in resumenTareas" :key="card.key" class="summary-card" :class="`tone-${card.tone}`">
+        <span class="summary-title">{{ card.title }}</span>
+        <strong class="summary-value">{{ card.value }}</strong>
+        <span class="summary-meta">{{ card.meta }}</span>
+      </article>
+    </section>
     <div class="toolbar">
       <div class="search-wrapper">
         <span class="search-icon">🔍</span>
@@ -580,7 +718,7 @@ onMounted(async () => {
           type="button"
           class="estado-pill"
           :class="{ active: filtroEstado === opt.value }"
-          @click="filtroEstado = opt.value; load()"
+          @click="filtroEstado = opt.value"
         >
           {{ opt.label }}
         </button>
@@ -601,12 +739,18 @@ onMounted(async () => {
       <span class="leyenda-item dentro">Dentro del plazo</span>
     </div>
 
-    <EmptyState
-      v-if="!tareasParaTabla.length"
-      :titulo="buscarTitulo.trim() ? 'Sin resultados' : 'No hay tareas'"
-      :mensaje="buscarTitulo.trim() ? 'No se encontraron tareas que coincidan con la búsqueda. Intente con otros términos o cambie el filtro de estado.' : 'Aún no hay tareas cargadas. Use el botón «Nueva tarea» para crear la primera.'"
-      :icono="buscarTitulo.trim() ? 'busqueda' : 'tareas'"
-    />
+    <template v-if="!tareasParaTabla.length">
+      <div v-if="buscarTitulo.trim() || filtroEstado" class="filtros-activos-aviso">
+        <span>Filtros activos — no hay tareas que coincidan.</span>
+        <button type="button" class="btn-link" @click="limpiarFiltros">Limpiar filtros</button>
+      </div>
+      <EmptyState
+        v-else
+        titulo="No hay tareas"
+        mensaje="Aún no hay tareas cargadas. Use el botón «Nueva tarea» para crear la primera."
+        icono="tareas"
+      />
+    </template>
     <div v-else class="table-wrapper">
       <table class="table">
       <thead>
@@ -618,6 +762,7 @@ onMounted(async () => {
           <th>Estado</th>
           <th>Avance</th>
           <th>Prioridad</th>
+          <th>Fecha</th>
           <th class="actions-header">Acciones</th>
         </tr>
       </thead>
@@ -630,9 +775,20 @@ onMounted(async () => {
           <td>{{ item.esSubtarea ? (item.tarea.tarea_padre_nombre || '-') : '—' }}</td>
           <td>{{ item.tarea.organizacion_nombre || item.tarea.area_nombre || item.tarea.secretaria_nombre || '-' }}</td>
           <td>{{ item.tarea.responsable_nombre || '-' }}</td>
-          <td>{{ item.tarea.estado }}</td>
-          <td>{{ item.tarea.porcentaje_avance }}%</td>
-          <td>{{ item.tarea.prioridad }}</td>
+          <td>
+            <span class="estado-chip" :class="estadoTareaClase(item.tarea.estado)">{{ item.tarea.estado }}</span>
+          </td>
+          <td class="avance-cell">
+            <div class="progress-inline">
+              <div class="progress-track">
+                <div class="progress-fill" :style="{ width: `${Math.min(100, Number(item.tarea.porcentaje_avance) || 0)}%` }" />
+              </div>
+              <span class="progress-value">{{ item.tarea.porcentaje_avance }}%</span>
+            </div>
+          </td>
+          <td>
+            <span class="prioridad-chip" :class="prioridadClase(item.tarea.prioridad)">{{ item.tarea.prioridad }}</span>
+          </td>
           <td class="vencimiento-cell">
             <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
               {{ item.tarea.fecha_vencimiento }}
@@ -926,14 +1082,53 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page h1 { margin-bottom: 0.5rem; }
+.page { display: flex; flex-direction: column; gap: 1rem; }
+.page-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.35rem;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+}
+.page h1 { margin: 0 0 0.35rem; }
+.page-subtitle { margin: 0; color: #64748b; }
 .subtitle-rol { color: #64748b; font-size: 0.9rem; margin-bottom: 1rem; }
+.filter-hint { color: #64748b; font-size: 0.9rem; margin-bottom: 0.8rem; }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+.summary-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.summary-title { font-size: 0.9rem; color: #64748b; }
+.summary-value { font-size: 1.9rem; color: #0f172a; line-height: 1; }
+.summary-meta { color: #64748b; font-size: 0.85rem; }
+.tone-neutral { border-top: 4px solid #2563eb; }
+.tone-info { border-top: 4px solid #0ea5e9; }
+.tone-warning { border-top: 4px solid #f59e0b; }
+.tone-danger { border-top: 4px solid #dc2626; }
 .toolbar {
   display: flex;
   gap: 1rem;
-  margin-bottom: 1rem;
   align-items: center;
   flex-wrap: wrap;
+  padding: 1rem 1.1rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
 }
 .search-wrapper {
   position: relative;
@@ -1016,9 +1211,31 @@ onMounted(async () => {
   background: #3b82f6;
   color: white;
 }
-.table { width: 100%; background: white; border-radius: 8px; overflow: hidden; }
-.table th, .table td { padding: 0.75rem 1rem; text-align: left; }
-.table th { background: #f8fafc; }
+.table-wrapper {
+  overflow-x: auto;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+}
+.table { width: 100%; background: white; border-radius: 18px; overflow: hidden; }
+.table th, .table td {
+  padding: 0.85rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+  vertical-align: middle;
+}
+.actions-header,
+.actions-cell { text-align: center !important; }
+.actions-cell { white-space: nowrap; }
+.table th {
+  background: #f8fafc;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+.table tbody tr:hover { background: #f8fbff; }
 .empty-row td {
   text-align: center;
   color: #64748b;
@@ -1027,6 +1244,48 @@ onMounted(async () => {
 }
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
+.avance-cell { min-width: 190px; }
+.progress-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.progress-track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #0ea5e9);
+  border-radius: 999px;
+}
+.progress-value {
+  min-width: 2.8rem;
+  font-weight: 700;
+  color: #0f172a;
+  font-size: 0.88rem;
+}
+.estado-chip,
+.prioridad-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.estado-pendiente { background: #fef3c7; color: #a16207; }
+.estado-proceso { background: #dbeafe; color: #1d4ed8; }
+.estado-finalizada { background: #dcfce7; color: #15803d; }
+.estado-bloqueada { background: #fee2e2; color: #b91c1c; }
+.estado-neutro { background: #e2e8f0; color: #475569; }
+.prioridad-alta { background: #fee2e2; color: #b91c1c; }
+.prioridad-media { background: #fef3c7; color: #a16207; }
+.prioridad-baja { background: #dcfce7; color: #15803d; }
+.prioridad-neutra { background: #e2e8f0; color: #475569; }
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -1184,4 +1443,32 @@ onMounted(async () => {
 .leyenda-item.vencida::before { background: #dc2626; }
 .leyenda-item.proxima::before { background: #eab308; }
 .leyenda-item.dentro::before { background: #22c55e; }
+@media (max-width: 1100px) {
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .page-hero { padding: 1rem; }
+}
+.filtros-activos-aviso {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: #fef9c3;
+  border: 1px solid #fde047;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  color: #78350f;
+}
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.btn-link:hover { color: #1d4ed8; }
 </style>

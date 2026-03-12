@@ -84,6 +84,15 @@ const usuariosFiltrados = computed(() => {
   })
 })
 
+const resumenUsuarios = computed(() => {
+  const total = usuariosFiltrados.value.length
+  const activos = usuariosFiltrados.value.filter((u) => u.estado !== false).length
+  return [
+    { key: 'total', title: 'Usuarios visibles', value: total, meta: 'Resultado actual de la vista', tone: 'neutral' },
+    { key: 'activos', title: 'Activos', value: activos, meta: `${Math.max(0, total - activos)} inactivos`, tone: 'success' },
+  ]
+})
+
 async function descargarExcel() {
   const lista = usuariosFiltrados.value
   const headers = ['Nombre completo', 'Email', 'Rol', 'Área/Secretaría', 'Estado']
@@ -246,8 +255,22 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <h1>Usuarios</h1>
-    <div class="toolbar">
+    <div class="page-hero">
+      <div>
+        <h1>Usuarios</h1>
+        <p class="page-subtitle">Administración de usuarios con una presentación visual alineada al resto del sistema.</p>
+      </div>
+    </div>
+
+    <section class="summary-grid usuarios-summary">
+      <article v-for="card in resumenUsuarios" :key="card.key" class="summary-card" :class="`tone-${card.tone}`">
+        <span class="summary-title">{{ card.title }}</span>
+        <strong class="summary-value">{{ card.value }}</strong>
+        <span class="summary-meta">{{ card.meta }}</span>
+      </article>
+    </section>
+
+    <div class="toolbar toolbar-card">
       <input
         v-model="buscarUsuario"
         type="search"
@@ -272,8 +295,8 @@ onMounted(load)
       :mensaje="buscarUsuario.trim() ? 'No se encontraron usuarios que coincidan con la búsqueda.' : 'Aún no hay usuarios cargados. Use el botón «Nuevo usuario» para crear el primero.'"
       icono="lista"
     />
-    <div v-else class="table-wrapper">
-      <table class="table">
+    <div v-else class="table-wrapper app-table-wrapper">
+      <table class="table app-table">
       <thead>
         <tr>
           <th>Nombre completo</th>
@@ -290,7 +313,11 @@ onMounted(load)
           <td>{{ u.email }}</td>
           <td>{{ u.rol_nombre || '-' }}</td>
           <td>{{ u.area_nombre || u.secretaria_nombre || '-' }}</td>
-          <td>{{ u.estado ? 'Activo' : 'Inactivo' }}</td>
+          <td>
+            <span class="status-chip" :class="u.estado ? 'status-active' : 'status-inactive'">
+              {{ u.estado ? 'Activo' : 'Inactivo' }}
+            </span>
+          </td>
           <td class="actions-cell">
             <button class="btn-action" title="Ver" @click="openVer(u)"><IconEye class="btn-icon-sm" /> Ver</button>
             <button class="btn-action" title="Editar" @click="openEdit(u)"><IconEdit class="btn-icon-sm" /> Editar</button>
@@ -303,28 +330,28 @@ onMounted(load)
 
     <!-- Modal Ver detalle usuario -->
     <div v-if="showVerModal && usuarioVer" class="modal-overlay" @click.self="closeVerModal">
-      <div class="modal modal-ver">
+      <div class="modal modal-ver app-modal app-modal-md">
         <h2>Detalle del usuario</h2>
-        <div class="detalle-content">
-          <div class="detalle-row">
-            <span class="detalle-label">Nombre completo</span>
-            <span class="detalle-valor">{{ usuarioVer.nombre_completo || `${usuarioVer.nombre || ''} ${usuarioVer.apellido || ''}`.trim() || '-' }}</span>
+        <div class="detalle-content app-detail-content">
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Nombre completo</span>
+            <span class="detalle-valor app-detail-value">{{ usuarioVer.nombre_completo || `${usuarioVer.nombre || ''} ${usuarioVer.apellido || ''}`.trim() || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Email</span>
-            <span class="detalle-valor">{{ usuarioVer.email || '-' }}</span>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Email</span>
+            <span class="detalle-valor app-detail-value">{{ usuarioVer.email || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Rol</span>
-            <span class="detalle-valor">{{ usuarioVer.rol_nombre || '-' }}</span>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Rol</span>
+            <span class="detalle-valor app-detail-value">{{ usuarioVer.rol_nombre || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Área / Secretaría</span>
-            <span class="detalle-valor">{{ usuarioVer.area_nombre || usuarioVer.secretaria_nombre || '-' }}</span>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Área / Secretaría</span>
+            <span class="detalle-valor app-detail-value">{{ usuarioVer.area_nombre || usuarioVer.secretaria_nombre || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Estado</span>
-            <span class="detalle-valor">{{ usuarioVer.estado !== false ? 'Activo' : 'Inactivo' }}</span>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Estado</span>
+            <span class="detalle-valor app-detail-value">{{ usuarioVer.estado !== false ? 'Activo' : 'Inactivo' }}</span>
           </div>
         </div>
         <div class="modal-actions">
@@ -334,18 +361,19 @@ onMounted(load)
     </div>
 
     <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
-      <div class="modal">
+      <div class="modal app-modal app-modal-lg">
         <h2>{{ editingId ? 'Editar' : 'Nuevo' }} usuario</h2>
-        <form @submit.prevent="save">
+        <form class="app-form" @submit.prevent="save">
           <label>Nombre</label>
-          <input v-model="form.nombre" placeholder="Nombre" required />
+          <input v-model="form.nombre" class="app-input" placeholder="Nombre" required />
           <label>Apellido</label>
-          <input v-model="form.apellido" placeholder="Apellido" />
+          <input v-model="form.apellido" class="app-input" placeholder="Apellido" />
           <label>Email</label>
-          <input v-model="form.email" type="email" placeholder="Email" required />
+          <input v-model="form.email" class="app-input" type="email" placeholder="Email" required />
           <label>Contraseña</label>
           <input
             v-model="form.password"
+            class="app-input"
             type="password"
             placeholder="Contraseña"
             :required="!editingId"
@@ -358,6 +386,7 @@ onMounted(load)
           <label>Repetir contraseña</label>
           <input
             v-model="form.passwordConfirm"
+            class="app-input"
             type="password"
             placeholder="Repetir contraseña"
             :required="requierePassword && !!form.password"
@@ -366,32 +395,32 @@ onMounted(load)
           <p v-if="form.passwordConfirm && !passwordsCoinciden" class="msg-error">Las contraseñas no coinciden</p>
           <p v-else-if="form.passwordConfirm && passwordsCoinciden && form.password" class="msg-ok">Las contraseñas coinciden</p>
           <label>Rol</label>
-          <select v-model="form.rol" required @change="onRolChange">
+          <select v-model="form.rol" class="app-select" required @change="onRolChange">
             <option :value="null">Seleccionar</option>
             <option v-for="r in roles" :key="(r.id as number)" :value="r.id">{{ r.nombre }}</option>
           </select>
           <template v-if="form.rol && rolNombreActual === 'Carga'">
             <label class="area-label">Pertenece a:</label>
             <div class="radio-group">
-              <label class="radio-label">
+              <label class="radio-label app-radio">
                 <input v-model="tipoOrganizacionUsuario" type="radio" value="area" @change="form.area = null; form.secretaria = null" />
                 Área
               </label>
-              <label class="radio-label">
+              <label class="radio-label app-radio">
                 <input v-model="tipoOrganizacionUsuario" type="radio" value="secretaria" @change="form.area = null; form.secretaria = null" />
                 Secretaría
               </label>
             </div>
             <template v-if="tipoOrganizacionUsuario === 'area'">
               <label>Área</label>
-              <select v-model="form.area" required>
+              <select v-model="form.area" class="app-select" required>
                 <option :value="null">Seleccionar área</option>
                 <option v-for="a in areas" :key="(a.id as number)" :value="a.id">{{ a.nombre }}</option>
               </select>
             </template>
             <template v-else-if="tipoOrganizacionUsuario === 'secretaria'">
               <label>Secretaría</label>
-              <select v-model="form.secretaria" required>
+              <select v-model="form.secretaria" class="app-select" required>
                 <option :value="null">Seleccionar secretaría</option>
                 <option v-for="s in secretarias" :key="(s.id as number)" :value="s.id">{{ s.codigo }} - {{ s.nombre }}</option>
               </select>
@@ -399,12 +428,12 @@ onMounted(load)
           </template>
           <template v-else-if="form.rol && rolNombreActual === 'Visualización'">
             <label class="area-label">Área (opcional)</label>
-            <select v-model="form.area">
+            <select v-model="form.area" class="app-select">
               <option :value="null">Sin área</option>
               <option v-for="a in areasParaSeleccionar" :key="(a.id as number)" :value="a.id">{{ a.nombre }}</option>
             </select>
           </template>
-          <label class="checkbox">
+          <label class="checkbox app-checkbox">
             <input v-model="form.estado" type="checkbox" />
             Activo
           </label>
@@ -423,44 +452,22 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page h1 { margin-bottom: 1rem; }
+.page { display: flex; flex-direction: column; gap: 1rem; }
+.page h1 { margin: 0; }
+.usuarios-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
-  margin-bottom: 1rem;
 }
 .search-input {
   flex: 1;
   min-width: 200px;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
   font-size: 0.9rem;
 }
 .toolbar-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.btn-secondary {
-  background: #16a34a;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.btn-secondary:disabled { background: #94a3b8; cursor: not-allowed; }
-.toolbar .btn-primary {
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.table { width: 100%; background: white; border-radius: 8px; overflow: hidden; }
-.table th, .table td { padding: 0.75rem 1rem; text-align: left; }
-.table th { background: #f8fafc; }
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
 .modal-overlay {
@@ -472,28 +479,13 @@ onMounted(load)
   justify-content: center;
   z-index: 100;
 }
-.modal {
-  background: white;
-  padding: 1.5rem;
-  border-radius: 10px;
-  max-width: 400px;
-  width: 90%;
-}
-.modal form { display: flex; flex-direction: column; gap: 0.5rem; }
-.modal input, .modal select {
-  padding: 0.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-}
 .checkbox { display: flex; align-items: center; gap: 0.5rem; }
 .radio-group { display: flex; gap: 1rem; margin: 0.25rem 0; }
 .radio-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
 .msg-error { font-size: 0.8rem; color: #dc2626; margin: 0.25rem 0 0; }
 .msg-ok { font-size: 0.8rem; color: #16a34a; margin: 0.25rem 0 0; }
 .input-error { border-color: #dc2626 !important; }
-.modal-ver { max-width: 480px; }
-.detalle-content { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem; }
-.detalle-row { display: flex; flex-direction: column; gap: 0.25rem; }
-.detalle-label { font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
-.detalle-valor { font-size: 0.95rem; color: #1e293b; }
+@media (max-width: 700px) {
+  .usuarios-summary { grid-template-columns: 1fr; }
+}
 </style>

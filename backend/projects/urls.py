@@ -24,6 +24,7 @@ from backup_restore.views import (
 )
 from dashboards.views import (
     DashboardEjecutivoView,
+    DashboardAnaliticoView,
     ProyectosPorUsuarioView,
     ProyectosDashboardView,
     EvolucionProyectoView,
@@ -62,6 +63,7 @@ urlpatterns = [
     path("usuarios/selector/", UsuariosParaSelectorView.as_view()),
     path("", include(router.urls)),
     path("dashboard/ejecutivo/", DashboardEjecutivoView.as_view()),
+    path("dashboard/analitico/", DashboardAnaliticoView.as_view()),
     path("dashboard/proyectos/", ProyectosDashboardView.as_view()),
     path("dashboard/proyectos/<int:proyecto_id>/evolucion/", EvolucionProyectoView.as_view()),
     path("dashboard/usuarios/<int:usuario_id>/proyectos/", ProyectosPorUsuarioView.as_view()),

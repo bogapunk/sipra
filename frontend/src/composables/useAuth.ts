@@ -20,6 +20,19 @@ const user = ref<User | null>(null)
 const STORAGE_KEY = 'sistema_proyectos_user'
 const TOKEN_KEY = 'sistema_proyectos_token'
 
+function normalizarRol(valor: unknown): RolNombre | undefined {
+  const raw = String(valor || '').trim()
+  if (!raw) return undefined
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+  if (normalized === 'administrador') return 'Administrador'
+  if (normalized === 'carga') return 'Carga'
+  if (normalized === 'visualizacion') return 'Visualización'
+  return undefined
+}
+
 function mapUserPayload(u: Record<string, unknown>): User {
   return {
     id: Number(u.id),
@@ -28,7 +41,7 @@ function mapUserPayload(u: Record<string, unknown>): User {
     nombreCompleto: String(u.nombreCompleto || `${u.nombre || ''} ${u.apellido || ''}`.trim()),
     email: String(u.email || ''),
     rol: Number(u.rol || 0),
-    rolNombre: u.rolNombre as RolNombre | undefined,
+    rolNombre: normalizarRol(u.rolNombre),
     area: u.area ? Number(u.area) : undefined,
     areaNombre: u.areaNombre ? String(u.areaNombre) : undefined,
     secretaria: u.secretaria ? Number(u.secretaria) : undefined,
@@ -63,7 +76,11 @@ export function useAuth() {
     const token = localStorage.getItem(TOKEN_KEY)
     if (stored && token) {
       try {
-        user.value = JSON.parse(stored)
+        const parsed = JSON.parse(stored) as User
+        user.value = {
+          ...parsed,
+          rolNombre: normalizarRol(parsed.rolNombre),
+        }
       } catch {
         user.value = null
         localStorage.removeItem(STORAGE_KEY)

@@ -109,6 +109,13 @@ class Proyecto(models.Model):
     def __str__(self):
         return self.nombre
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["estado", "fecha_fin_estimada"], name="proy_estado_fin_idx"),
+            models.Index(fields=["area", "estado"], name="proy_area_estado_idx"),
+            models.Index(fields=["secretaria", "estado"], name="proy_sec_estado_idx"),
+        ]
+
 
 class Indicador(models.Model):
     """Indicador de seguimiento asociado a un proyecto."""

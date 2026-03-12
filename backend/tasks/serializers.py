@@ -3,26 +3,19 @@ from .models import Tarea, HistorialTarea, ComentarioTarea, AdjuntoTarea
 from projects.upload_validators import validate_uploaded_file, validate_original_filename
 
 
-class TareaSerializer(serializers.ModelSerializer):
+class TareaBaseSerializer(serializers.ModelSerializer):
     area_nombre = serializers.SerializerMethodField()
     tarea_padre_nombre = serializers.SerializerMethodField()
-    subtareas = serializers.SerializerMethodField()
-
-    def get_area_nombre(self, obj):
-        return obj.area.nombre if obj.area else ''
     secretaria_nombre = serializers.SerializerMethodField()
     proyecto_nombre = serializers.SerializerMethodField()
     responsable_nombre = serializers.SerializerMethodField()
     organizacion_nombre = serializers.SerializerMethodField()
 
+    def get_area_nombre(self, obj):
+        return obj.area.nombre if obj.area else ''
+
     def get_tarea_padre_nombre(self, obj):
         return obj.tarea_padre.titulo if obj.tarea_padre else None
-
-    def get_subtareas(self, obj):
-        if self.context.get('subtarea'):
-            return []
-        hijos = obj.subtareas.select_related('area', 'secretaria', 'proyecto', 'responsable').order_by('orden', 'id')
-        return TareaSerializer(hijos, many=True, context={'subtarea': True}).data
 
     def get_secretaria_nombre(self, obj):
         return obj.secretaria.nombre if obj.secretaria else ''
@@ -63,6 +56,38 @@ class TareaSerializer(serializers.ModelSerializer):
         if pct == 100 and 'estado' not in validated_data:
             validated_data['estado'] = 'Finalizada'
         return super().update(instance, validated_data)
+
+
+class TareaListSerializer(TareaBaseSerializer):
+    # En listados pesados devolvemos subtareas vacías para evitar duplicar
+    # grandes árboles en cada fila. La UI recompone la jerarquía localmente.
+    subtareas = serializers.SerializerMethodField()
+
+    def get_subtareas(self, obj):
+        return []
+
+    class Meta:
+        model = Tarea
+        fields = ['id', 'proyecto', 'proyecto_nombre', 'tarea_padre', 'tarea_padre_nombre', 'subtareas',
+                  'etapa', 'area', 'area_nombre', 'secretaria', 'secretaria_nombre',
+                  'organizacion_nombre', 'titulo', 'descripcion', 'responsable', 'responsable_nombre',
+                  'fecha_inicio', 'fecha_vencimiento', 'estado', 'porcentaje_avance', 'prioridad', 'orden', 'fecha_creacion']
+
+
+class TareaSerializer(TareaBaseSerializer):
+    subtareas = serializers.SerializerMethodField()
+
+    def get_subtareas(self, obj):
+        if self.context.get('subtarea'):
+            return []
+        hijos = getattr(obj, 'subtareas_prefetch', None)
+        if hijos is None:
+            hijos = list(
+                obj.subtareas.select_related(
+                    'area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'
+                ).order_by('orden', 'id')
+            )
+        return TareaSerializer(hijos, many=True, context={'subtarea': True}).data
 
     class Meta:
         model = Tarea

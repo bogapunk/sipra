@@ -63,6 +63,15 @@ const secretariasFiltradas = computed(() => {
   )
 })
 
+const resumenSecretarias = computed(() => {
+  const total = secretariasFiltradas.value.length
+  const activas = secretariasFiltradas.value.filter((s) => s.activa !== false).length
+  return [
+    { key: 'total', title: 'Secretarias visibles', value: total, meta: 'Resultado actual de la vista', tone: 'neutral' },
+    { key: 'activas', title: 'Activas', value: activas, meta: `${Math.max(0, total - activas)} inactivas`, tone: 'success' },
+  ]
+})
+
 async function descargarExcel() {
   const lista = secretariasFiltradas.value
   const headers = ['Código', 'Nombre', 'Descripción', 'Estado']
@@ -152,15 +161,29 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <h1>Secretarías</h1>
-    <div class="toolbar">
+    <div class="page-hero">
+      <div>
+        <h1>Secretarías</h1>
+        <p class="page-subtitle">Catálogo institucional unificado con filtros y estado visual consistente.</p>
+      </div>
+    </div>
+
+    <section class="summary-grid secretarias-summary">
+      <article v-for="card in resumenSecretarias" :key="card.key" class="summary-card" :class="`tone-${card.tone}`">
+        <span class="summary-title">{{ card.title }}</span>
+        <strong class="summary-value">{{ card.value }}</strong>
+        <span class="summary-meta">{{ card.meta }}</span>
+      </article>
+    </section>
+
+    <div class="toolbar toolbar-card">
       <input
         v-model="buscarSecretaria"
         type="search"
         placeholder="Buscar por código o nombre..."
         class="search-input"
       />
-      <select v-model="filtroEstado" class="filter-select">
+      <select v-model="filtroEstado" class="filter-select app-select">
         <option value="all">Todas</option>
         <option value="activa">Activas</option>
         <option value="inactiva">Inactivas</option>
@@ -183,8 +206,8 @@ onMounted(load)
       :mensaje="buscarSecretaria.trim() ? 'No se encontraron secretarías que coincidan con la búsqueda. Intente con otros términos.' : 'Aún no hay secretarías cargadas. Use el botón «Nueva Secretaría» para crear la primera.'"
       icono="lista"
     />
-    <div v-else class="table-wrapper">
-      <table class="table">
+    <div v-else class="table-wrapper app-table-wrapper">
+      <table class="table app-table">
       <thead>
         <tr>
           <th>Código</th>
@@ -200,7 +223,7 @@ onMounted(load)
           <td>{{ s.nombre }}</td>
           <td>{{ (s.descripcion || '').toString().slice(0, 60) }}{{ (s.descripcion || '').toString().length > 60 ? '...' : '' }}</td>
           <td>
-            <span :class="['badge', s.activa !== false ? 'badge-activa' : 'badge-inactiva']">
+            <span class="status-chip" :class="s.activa !== false ? 'status-active' : 'status-inactive'">
               {{ s.activa !== false ? 'Activa' : 'Inactiva' }}
             </span>
           </td>
@@ -224,24 +247,24 @@ onMounted(load)
 
     <!-- Modal Ver detalle secretaría -->
     <div v-if="showVerModal && secretariaVer" class="modal-overlay" @click.self="closeVerModal">
-      <div class="modal modal-ver">
+      <div class="modal modal-ver app-modal app-modal-md">
         <h2>Detalle de la secretaría</h2>
-        <div class="detalle-content">
-          <div class="detalle-row">
-            <span class="detalle-label">Código</span>
-            <span class="detalle-valor">{{ secretariaVer.codigo || '-' }}</span>
+        <div class="detalle-content app-detail-content">
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Código</span>
+            <span class="detalle-valor app-detail-value">{{ secretariaVer.codigo || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Nombre</span>
-            <span class="detalle-valor">{{ secretariaVer.nombre || '-' }}</span>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Nombre</span>
+            <span class="detalle-valor app-detail-value">{{ secretariaVer.nombre || '-' }}</span>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Descripción</span>
-            <p class="detalle-valor detalle-desc">{{ secretariaVer.descripcion || '-' }}</p>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Descripción</span>
+            <p class="detalle-valor detalle-desc app-detail-value app-detail-desc">{{ secretariaVer.descripcion || '-' }}</p>
           </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Estado</span>
-            <span class="detalle-valor">{{ secretariaVer.activa !== false ? 'Activa' : 'Inactiva' }}</span>
+          <div class="detalle-row app-detail-row">
+            <span class="detalle-label app-detail-label">Estado</span>
+            <span class="detalle-valor app-detail-value">{{ secretariaVer.activa !== false ? 'Activa' : 'Inactiva' }}</span>
           </div>
         </div>
         <div class="modal-actions">
@@ -251,13 +274,14 @@ onMounted(load)
     </div>
 
     <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
-      <div class="modal">
+      <div class="modal app-modal app-modal-md">
         <h2>{{ editingId ? 'Editar' : 'Nueva' }} secretaría</h2>
-        <form @submit.prevent="save">
+        <form class="app-form" @submit.prevent="save">
           <label>Código <span class="required">*</span></label>
           <input
             v-model="form.codigo"
             placeholder="Ej: EC, CYT"
+            class="app-input"
             :readonly="!!editingId"
             :class="{ 'input-error': errorCodigo }"
             @blur="validarCampos"
@@ -267,13 +291,14 @@ onMounted(load)
           <input
             v-model="form.nombre"
             placeholder="Nombre"
+            class="app-input"
             :class="{ 'input-error': errorNombre }"
             @blur="validarCampos"
           />
           <span v-if="errorNombre" class="error-msg">{{ errorNombre }}</span>
           <label>Descripción</label>
-          <textarea v-model="form.descripcion" placeholder="Descripción" rows="3" />
-          <label v-if="editingId" class="checkbox">
+          <textarea v-model="form.descripcion" class="app-textarea" placeholder="Descripción" rows="3" />
+          <label v-if="editingId" class="checkbox app-checkbox">
             <input v-model="form.activa" type="checkbox" />
             Activa
           </label>
@@ -288,53 +313,26 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page h1 { margin-bottom: 1rem; }
+.page { display: flex; flex-direction: column; gap: 1rem; }
+.page h1 { margin: 0; }
+.secretarias-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
-  margin-bottom: 1rem;
 }
 .search-input {
   flex: 1;
   min-width: 200px;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
   font-size: 0.9rem;
 }
 .filter-select {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
   font-size: 0.9rem;
 }
 .toolbar-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.btn-secondary {
-  background: #16a34a;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.btn-secondary:disabled { background: #94a3b8; cursor: not-allowed; }
-.btn-primary {
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.table { width: 100%; background: white; border-radius: 8px; overflow: hidden; }
-.table th, .table td { padding: 0.75rem 1rem; text-align: left; }
-.table th { background: #f8fafc; }
-.badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; }
-.badge-activa { background: #dcfce7; color: #166534; }
-.badge-inactiva { background: #fee2e2; color: #991b1b; }
 .page .btn-action, .page .btn-action-warn, .page .btn-action-success { margin-right: 0.5rem; }
 .btn-action-warn { color: #b45309; }
 .btn-action-success { color: #15803d; }
@@ -348,28 +346,12 @@ onMounted(load)
   justify-content: center;
   z-index: 100;
 }
-.modal {
-  background: white;
-  padding: 1.5rem;
-  border-radius: 10px;
-  max-width: 450px;
-  width: 90%;
-}
-.modal form { display: flex; flex-direction: column; gap: 0.5rem; }
-.modal input, .modal select, .modal textarea {
-  padding: 0.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-}
 .modal input[readonly] { background: #f1f5f9; }
 .checkbox { display: flex; align-items: center; gap: 0.5rem; }
-.modal-ver { max-width: 480px; }
-.detalle-content { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem; }
-.detalle-row { display: flex; flex-direction: column; gap: 0.25rem; }
-.detalle-label { font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em; }
-.detalle-valor { font-size: 0.95rem; color: #1e293b; }
-.detalle-desc { white-space: pre-wrap; line-height: 1.5; margin: 0; }
 .required { color: #dc2626; }
 .input-error { border-color: #dc2626 !important; }
 .error-msg { font-size: 0.85rem; color: #dc2626; margin-top: -0.25rem; }
+@media (max-width: 700px) {
+  .secretarias-summary { grid-template-columns: 1fr; }
+}
 </style>

@@ -1,0 +1,182 @@
+{
+  "requests_total": 136,
+  "requests_ok": 120,
+  "requests_error": 16,
+  "success_rate_pct": 88.24,
+  "avg_ms": 3883.75,
+  "p50_ms": 2600.2,
+  "p95_ms": 10489.52,
+  "p99_ms": 11640.92,
+  "max_ms": 12268.31,
+  "by_endpoint": {
+    "auth/login/": {
+      "requests": 24,
+      "ok": 8,
+      "errors": 16,
+      "avg_ms": 5264.15,
+      "p95_ms": 5875.44,
+      "max_ms": 6172.04
+    },
+    "auth/me/": {
+      "requests": 16,
+      "ok": 16,
+      "errors": 0,
+      "avg_ms": 2153.28,
+      "p95_ms": 2226.38,
+      "max_ms": 2264.96
+    },
+    "dashboard/analitico/": {
+      "requests": 16,
+      "ok": 16,
+      "errors": 0,
+      "avg_ms": 2423.95,
+      "p95_ms": 2996.69,
+      "max_ms": 3003.87
+    },
+    "dashboard/proyectos/": {
+      "requests": 16,
+      "ok": 16,
+      "errors": 0,
+      "avg_ms": 3572.62,
+      "p95_ms": 4965.32,
+      "max_ms": 4999.17
+    },
+    "proyectos/": {
+      "requests": 16,
+      "ok": 16,
+      "errors": 0,
+      "avg_ms": 3820.16,
+      "p95_ms": 5545.23,
+      "max_ms": 5615.74
+    },
+    "tareas/": {
+      "requests": 16,
+      "ok": 16,
+      "errors": 0,
+      "avg_ms": 8672.31,
+      "p95_ms": 11893.65,
+      "max_ms": 12268.31
+    },
+    "avances/por-area/": {
+      "requests": 16,
+      "ok": 16,
+      "errors": 0,
+      "avg_ms": 2302.26,
+      "p95_ms": 2822.74,
+      "max_ms": 2838.02
+    },
+    "avances/por-secretaria/": {
+      "requests": 16,
+      "ok": 16,
+      "errors": 0,
+      "avg_ms": 2171.06,
+      "p95_ms": 2327.4,
+      "max_ms": 2402.95
+    }
+  },
+  "sample_errors": [
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "carga",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    },
+    {
+      "endpoint": "http://localhost:8001/api/auth/login/",
+      "role": "visualizador",
+      "status": 401,
+      "error": "{\"error\":\"Credenciales incorrectas.\"}"
+    }
+  ],
+  "config": {
+    "base_url": "http://localhost:8001",
+    "virtual_users": 24,
+    "iterations": 2,
+    "workers": 24,
+    "elapsed_s": 56.46
+  }
+}
