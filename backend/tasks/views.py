@@ -1,8 +1,10 @@
 from datetime import timedelta
 from django.utils import timezone
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
-from django.db.models import Q, Prefetch, Max
+from django.db.models import Q, Prefetch, Max, Count, Avg
 from .models import Tarea, HistorialTarea, ComentarioTarea, AdjuntoTarea
 from projects.models import AdjuntoAuditLog
 from config.pagination import TaskListPagination
@@ -110,6 +112,7 @@ class TareaViewSet(viewsets.ModelViewSet):
         search = (self.request.query_params.get("search") or "").strip()
         vencimiento = self.request.query_params.get("vencimiento")
         solo_raices = self.request.query_params.get("solo_raices") == "1"
+        orden = (self.request.query_params.get("orden") or "").strip().lower()
         if usuario:
             from users.models import Usuario
             from projects.models import Proyecto, ProyectoEquipo
@@ -171,7 +174,31 @@ class TareaViewSet(viewsets.ModelViewSet):
             ).order_by('tarea_padre_id', 'orden', 'id')
         if solo_raices:
             qs = qs.filter(tarea_padre__isnull=True)
+        if orden == 'recientes':
+            return qs.order_by('-fecha_creacion', '-id')
         return qs.order_by('tarea_padre_id', 'orden', 'id')
+
+    @action(detail=False, methods=['get'], url_path='resumen')
+    def resumen(self, request):
+        """
+        Resumen global de tareas para tarjetas KPI del panel.
+        Se calcula sobre TODO el universo accesible por el usuario (sin paginar).
+        """
+        qs = filter_tasks_for_user(Tarea.objects.all(), request.user)
+        data = qs.aggregate(
+            total=Count('id'),
+            pendientes=Count('id', filter=Q(estado='Pendiente')),
+            en_proceso=Count('id', filter=Q(estado='En proceso')),
+            bloqueadas=Count('id', filter=Q(estado='Bloqueada')),
+            avance_promedio=Avg('porcentaje_avance'),
+        )
+        return Response({
+            'total': int(data.get('total') or 0),
+            'pendientes': int(data.get('pendientes') or 0),
+            'en_proceso': int(data.get('en_proceso') or 0),
+            'bloqueadas': int(data.get('bloqueadas') or 0),
+            'avance_promedio': round(float(data.get('avance_promedio') or 0), 2),
+        })
 
 
 class HistorialTareaViewSet(viewsets.ModelViewSet):

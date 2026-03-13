@@ -15,6 +15,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/composables/useAuth'
 import { useModalClose } from '@/composables/useModalClose'
 import EmptyState from '@/components/EmptyState.vue'
+import LoaderSpinner from '@/components/LoaderSpinner.vue'
 import { estadoVencimiento, claseVencimiento } from '@/utils/vencimiento'
 import { extraerMensajeError } from '@/utils/apiError'
 
@@ -53,6 +54,17 @@ const secretariaAsignar = ref<number | null>(null)
 const guardandoAsignar = ref(false)
 const filtroEstado = ref('')
 const buscarTitulo = ref('')
+const cargandoTabla = ref(false)
+const totalTareas = ref(0)
+const resumenGlobal = ref({
+  total: 0,
+  pendientes: 0,
+  en_proceso: 0,
+  bloqueadas: 0,
+  avance_promedio: 0,
+})
+const paginaActual = ref(1)
+const tamanioPagina = ref(50)
 const tareasPadreOptions = ref<Record<string, unknown>[]>([])
 const soporteCargado = ref(false)
 const ESTADOS_VALIDOS = new Set(['Pendiente', 'En proceso', 'Finalizada', 'Bloqueada'])
@@ -81,35 +93,17 @@ function parseListResponse(payload: unknown): Record<string, unknown>[] {
   return []
 }
 
-function hasNextPage(payload: unknown): boolean {
-  return Boolean(
-    payload && typeof payload === 'object' && 'next' in (payload as object) && (payload as { next?: unknown }).next
-  )
+function parseCount(payload: unknown): number {
+  if (payload && typeof payload === 'object' && 'count' in (payload as object)) {
+    const count = Number((payload as { count?: unknown }).count)
+    return Number.isFinite(count) ? count : 0
+  }
+  return Array.isArray(payload) ? payload.length : 0
 }
 
-async function fetchAllTareas(): Promise<Record<string, unknown>[]> {
-  // Intento 1: sin params → backend devuelve lista plana completa (OptInPageNumberPagination)
-  try {
-    const res = await api.get('tareas/')
-    const data = res.data
-    if (Array.isArray(data)) return data as Record<string, unknown>[]
-    const lista = parseListResponse(data)
-    if (lista.length > 0) return lista
-  } catch {
-    // seguir al intento 2
-  }
-  // Intento 2: con paginación explícita
-  const acumulado: Record<string, unknown>[] = []
-  let page = 1
-  while (true) {
-    const res = await api.get('tareas/', { params: { page, page_size: 200 } })
-    const data = res.data
-    acumulado.push(...parseListResponse(data))
-    if (!hasNextPage(data)) break
-    page += 1
-  }
-  return acumulado
-}
+const totalPaginas = computed(() => Math.max(1, Math.ceil(totalTareas.value / tamanioPagina.value)))
+const primerResultado = computed(() => totalTareas.value ? ((paginaActual.value - 1) * tamanioPagina.value) + 1 : 0)
+const ultimoResultado = computed(() => Math.min(totalTareas.value, paginaActual.value * tamanioPagina.value))
 
 async function cargarProyectosParaSelector() {
   try {
@@ -144,12 +138,55 @@ async function cargarDatosSoporte() {
   soporteCargado.value = true
 }
 
-const load = async () => {
-  invalidateApiCache('tareas')
+async function loadResumenGlobal() {
+  invalidateApiCache('tareas/resumen')
   try {
-    tareas.value = await fetchAllTareas()
+    const res = await api.get('tareas/resumen/')
+    const data = (res.data || {}) as Record<string, unknown>
+    resumenGlobal.value = {
+      total: Number(data.total || 0),
+      pendientes: Number(data.pendientes || 0),
+      en_proceso: Number(data.en_proceso || 0),
+      bloqueadas: Number(data.bloqueadas || 0),
+      avance_promedio: Number(data.avance_promedio || 0),
+    }
+  } catch {
+    resumenGlobal.value = {
+      total: 0,
+      pendientes: 0,
+      en_proceso: 0,
+      bloqueadas: 0,
+      avance_promedio: 0,
+    }
+  }
+}
+
+const modoHistorico = computed(() => Boolean(buscarTitulo.value.trim() || filtroEstado.value))
+
+const load = async (page = 1) => {
+  invalidateApiCache('tareas')
+  const search = buscarTitulo.value.trim()
+  const estado = filtroEstado.value
+  cargandoTabla.value = true
+  try {
+    const params: Record<string, string | number> = {
+      orden: 'recientes',
+      paginated: 1,
+      page,
+      page_size: tamanioPagina.value,
+    }
+    if (search) params.search = search
+    if (estado && ESTADOS_VALIDOS.has(estado)) params.estado = estado
+    const res = await api.get('tareas/', { params })
+    tareas.value = parseListResponse(res.data)
+    totalTareas.value = parseCount(res.data)
+    paginaActual.value = page
   } catch {
     tareas.value = []
+    totalTareas.value = 0
+    paginaActual.value = 1
+  } finally {
+    cargandoTabla.value = false
   }
 }
 
@@ -297,7 +334,7 @@ const save = async () => {
       toast.success('Tarea creada correctamente.')
     }
     showForm.value = false
-    load()
+    await Promise.all([load(paginaActual.value), loadResumenGlobal()])
   } catch (e) {
     toast.error(extraerMensajeError(e))
   }
@@ -308,7 +345,7 @@ const remove = async (id: number) => {
     try {
       await api.delete(`tareas/${id}/`)
       toast.success('Registro eliminado correctamente.')
-      load()
+      await Promise.all([load(paginaActual.value), loadResumenGlobal()])
     } catch {
       toast.error('Error al eliminar la tarea.')
     }
@@ -518,7 +555,7 @@ const guardarAsignar = async () => {
     await api.patch(`tareas/${id}/`, payload)
     toast.success('Tarea asignada correctamente.')
     closeAsignarModal()
-    load()
+    await load(paginaActual.value)
   } catch {
     toast.error('Error al asignar la tarea.')
   } finally {
@@ -551,30 +588,40 @@ const ESTADOS = [
 ] as const
 
 const tareasFiltradas = computed(() => {
-  const q = buscarTitulo.value.trim().toLowerCase()
-  const estado = filtroEstado.value
-  return tareas.value.filter((t: Record<string, unknown>) => {
-    const titulo = String(t.titulo || '').toLowerCase()
-    const okTitulo = !q || titulo.includes(q)
-    const okEstado = !estado || !ESTADOS_VALIDOS.has(estado) || String(t.estado || '') === estado
-    return okTitulo && okEstado
-  })
+  return tareas.value
 })
 
 const resumenTareas = computed(() => {
-  const lista = tareasFiltradas.value
-  const total = lista.length
-  const pendientes = lista.filter((t) => String(t.estado || '') === 'Pendiente').length
-  const enProceso = lista.filter((t) => String(t.estado || '') === 'En proceso').length
-  const bloqueadas = lista.filter((t) => String(t.estado || '') === 'Bloqueada').length
-  const avancePromedio = total
-    ? Math.round(lista.reduce((acc, t) => acc + (Number(t.porcentaje_avance) || 0), 0) / total)
-    : 0
+  const visibles = tareasFiltradas.value.length
   return [
-    { key: 'total', title: 'Tareas visibles', value: total, meta: 'Coincidencias totales de la búsqueda', tone: 'neutral' },
-    { key: 'pendientes', title: 'Pendientes', value: pendientes, meta: `${enProceso} en proceso`, tone: 'warning' },
-    { key: 'bloqueadas', title: 'Bloqueadas', value: bloqueadas, meta: 'Requieren seguimiento', tone: 'danger' },
-    { key: 'avance', title: 'Avance promedio', value: `${avancePromedio}%`, meta: 'Promedio de las tareas visibles', tone: 'info' },
+    {
+      key: 'total',
+      title: 'Tareas visibles',
+      value: resumenGlobal.value.total,
+      meta: `Mostrando ${visibles} en página ${paginaActual.value} de ${totalPaginas.value}`,
+      tone: 'neutral',
+    },
+    {
+      key: 'pendientes',
+      title: 'Pendientes',
+      value: resumenGlobal.value.pendientes,
+      meta: `${resumenGlobal.value.en_proceso} en proceso`,
+      tone: 'warning',
+    },
+    {
+      key: 'bloqueadas',
+      title: 'Bloqueadas',
+      value: resumenGlobal.value.bloqueadas,
+      meta: 'Sobre el total general',
+      tone: 'danger',
+    },
+    {
+      key: 'avance',
+      title: 'Avance promedio',
+      value: `${Math.round(resumenGlobal.value.avance_promedio)}%`,
+      meta: 'Promedio sobre el total general',
+      tone: 'info',
+    },
   ]
 })
 
@@ -667,12 +714,29 @@ function limpiarFiltros() {
   buscarTitulo.value = ''
 }
 
+let busquedaTimer: ReturnType<typeof setTimeout> | null = null
+watch(buscarTitulo, () => {
+  if (busquedaTimer) clearTimeout(busquedaTimer)
+  busquedaTimer = setTimeout(() => { load(1) }, 350)
+})
+watch(filtroEstado, () => { load(1) })
+watch(tamanioPagina, () => {
+  if (!modoHistorico.value) return
+  load(1)
+})
+
+async function irAPagina(page: number) {
+  const destino = Math.min(Math.max(1, page), totalPaginas.value)
+  if (destino === paginaActual.value) return
+  await load(destino)
+}
+
 onMounted(async () => {
   limpiarFiltros()
   // Carga soporte en paralelo (sin bloquear la carga principal)
   Promise.all([cargarDatosSoporte(), cargarProyectosParaSelector()]).catch(() => undefined)
   // Carga principal — no bloqueada por el soporte
-  await load()
+  await Promise.all([load(1), loadResumenGlobal()])
   await abrirDetalleDesdeRuta()
 })
 
@@ -739,7 +803,9 @@ watch(() => route.query.ver, async () => {
       <span class="leyenda-item dentro">Dentro del plazo</span>
     </div>
 
-    <template v-if="!tareasParaTabla.length">
+    <LoaderSpinner v-if="cargandoTabla" texto="Cargando tareas..." />
+
+    <template v-else-if="!tareasParaTabla.length">
       <div v-if="buscarTitulo.trim() || filtroEstado" class="filtros-activos-aviso">
         <span>Filtros activos — no hay tareas que coincidan.</span>
         <button type="button" class="btn-link" @click="limpiarFiltros">Limpiar filtros</button>
@@ -806,6 +872,28 @@ watch(() => route.query.ver, async () => {
         </tr>
       </tbody>
     </table>
+    </div>
+
+    <div v-if="tareasFiltradas.length" class="pagination-bar">
+      <span class="pagination-text">
+        Mostrando {{ primerResultado }}-{{ ultimoResultado }} de {{ totalTareas }} tareas
+      </span>
+      <div class="pagination-actions">
+        <label v-if="modoHistorico" class="pagination-size">
+          Tamaño:
+          <select v-model.number="tamanioPagina">
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+        </label>
+        <button type="button" class="btn-action" :disabled="paginaActual <= 1 || cargandoTabla" @click="irAPagina(paginaActual - 1)">
+          Anterior
+        </button>
+        <span class="pagination-page">Página {{ paginaActual }} de {{ totalPaginas }}</span>
+        <button type="button" class="btn-action" :disabled="paginaActual >= totalPaginas || cargandoTabla" @click="irAPagina(paginaActual + 1)">
+          Siguiente
+        </button>
+      </div>
     </div>
 
     <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
@@ -1471,4 +1559,42 @@ watch(() => route.query.ver, async () => {
   font-size: 0.9rem;
 }
 .btn-link:hover { color: #1d4ed8; }
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+}
+.pagination-text {
+  color: #64748b;
+  font-size: 0.92rem;
+}
+.pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.pagination-page {
+  min-width: 145px;
+  text-align: center;
+  color: #0f172a;
+  font-weight: 600;
+}
+.pagination-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+.pagination-size select {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  background: white;
+}
 </style>

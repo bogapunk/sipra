@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -114,8 +115,27 @@ POSTGRES_DATABASE = {
     'CONN_MAX_AGE': int(_env_str('POSTGRES_CONN_MAX_AGE', '600')),
 }
 
+
+def _database_from_url(url: str) -> dict:
+    parsed = urlparse(url)
+    if parsed.scheme not in ('postgres', 'postgresql'):
+        raise ValueError('DATABASE_URL debe usar esquema postgres/postgresql.')
+    return {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': unquote((parsed.path or '/').lstrip('/')),
+        'USER': unquote(parsed.username or ''),
+        'PASSWORD': unquote(parsed.password or ''),
+        'HOST': parsed.hostname or 'localhost',
+        'PORT': int(parsed.port or 5432),
+        'CONN_MAX_AGE': int(_env_str('POSTGRES_CONN_MAX_AGE', '600')),
+    }
+
+
+DATABASE_URL = _env_str('DATABASE_URL')
+DEFAULT_DATABASE = _database_from_url(DATABASE_URL) if DATABASE_URL else POSTGRES_DATABASE
+
 DATABASES = {
-    'default': POSTGRES_DATABASE,
+    'default': DEFAULT_DATABASE,
 }
 
 LANGUAGE_CODE = 'es'
@@ -146,6 +166,57 @@ if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
+
+# Logging (consola + archivo rotativo)
+LOG_LEVEL = _env_str('LOG_LEVEL', 'DEBUG' if DEBUG else 'INFO').upper()
+LOG_DIR = Path(_env_str('LOG_DIR', str(BASE_DIR / 'logs')))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / _env_str('LOG_FILE_NAME', 'sipra.log')
+LOG_MAX_BYTES = int(_env_str('LOG_MAX_BYTES', str(10 * 1024 * 1024)))
+LOG_BACKUP_COUNT = int(_env_str('LOG_BACKUP_COUNT', '10'))
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+            'level': LOG_LEVEL,
+        },
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': str(LOG_FILE),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'standard',
+            'level': LOG_LEVEL,
+            'encoding': 'utf-8',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'file'],
+        'level': LOG_LEVEL,
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': LOG_LEVEL,
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+    },
+}
 
 # Backup & Restore
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', BASE_DIR / 'backups'))
