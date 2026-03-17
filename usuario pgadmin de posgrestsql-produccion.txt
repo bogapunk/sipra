@@ -106,3 +106,7 @@ http://10.1.9.194:9000/
 
 usuario:admin
 password:r2VEug>Mew{$LS29
+
+
+usuario: boga
+password: XfQDfJ0l2.7PS<f?
