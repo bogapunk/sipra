@@ -1,9 +1,11 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from django.db.models import Avg
 from .upload_validators import validate_uploaded_file, validate_original_filename
 from .models import (
     Eje, Plan, Programa, ObjetivoEstrategico,
-    Proyecto, ProyectoArea, ProyectoEquipo, Etapa, ComentarioProyecto, AdjuntoProyecto, Indicador,
+    Proyecto, ProyectoArea, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto, Indicador,
     ComentarioAuditLog, AdjuntoAuditLog,
 )
 
@@ -54,29 +56,101 @@ class ProyectoEquipoSerializer(serializers.ModelSerializer):
         fields = ['id', 'proyecto', 'usuario', 'usuario_nombre']
 
 
+class ProyectoPresupuestoItemSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
+
+    class Meta:
+        model = ProyectoPresupuestoItem
+        fields = [
+            'id',
+            'categoria_gasto',
+            'monto',
+            'detalle',
+            'orden',
+        ]
+
+    def validate(self, data):
+        instance = getattr(self, 'instance', None)
+        detalle = (data.get('detalle', getattr(instance, 'detalle', '')) or '').strip()
+        monto = data.get('monto', getattr(instance, 'monto', Decimal('0')) or Decimal('0'))
+        data['numero_expediente'] = ''
+        data['es_viaticos'] = False
+        data['dotacion_tipo'] = ''
+        data['horas_hombre'] = None
+        if Decimal(str(monto or 0)) <= 0 and not detalle:
+            raise serializers.ValidationError({
+                'detalle': 'Cada gasto debe tener un monto o un detalle u observacion.'
+            })
+        return data
+
+
 class ProyectoSerializer(serializers.ModelSerializer):
     usuario_responsable_nombre = serializers.CharField(source='usuario_responsable.nombre_completo', read_only=True)
     area_nombre = serializers.CharField(source='area.nombre', read_only=True)
     equipo_nombres = serializers.SerializerMethodField()
     equipo = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
+    presupuesto_items = ProyectoPresupuestoItemSerializer(many=True, required=False)
+    presupuesto_cargado = serializers.SerializerMethodField()
 
     def get_equipo_nombres(self, obj):
         return [pe.usuario.nombre_completo for pe in obj.equipo.select_related('usuario').all()]
 
+    def get_presupuesto_cargado(self, obj):
+        items = getattr(obj, 'presupuesto_items', None)
+        if items is not None:
+            try:
+                return float(round(sum(Decimal(str(item.monto or 0)) for item in items.all()), 2))
+            except TypeError:
+                pass
+        total = sum(
+            Decimal(str(item.monto or 0))
+            for item in ProyectoPresupuestoItem.objects.filter(proyecto=obj).only('monto')
+        )
+        return float(round(total, 2))
+
+    def _sync_presupuesto_items(self, proyecto, items_data):
+        if items_data is None:
+            return
+
+        existentes = {
+            item.id: item
+            for item in proyecto.presupuesto_items.all()
+        }
+        ids_conservados = set()
+
+        for index, item_data in enumerate(items_data):
+            item_id = item_data.pop('id', None)
+            item_data['orden'] = item_data.get('orden', index)
+            if item_id and item_id in existentes:
+                item = existentes[item_id]
+                for field, value in item_data.items():
+                    setattr(item, field, value)
+                item.save()
+                ids_conservados.add(item_id)
+                continue
+            nuevo = ProyectoPresupuestoItem.objects.create(proyecto=proyecto, **item_data)
+            ids_conservados.add(nuevo.id)
+
+        proyecto.presupuesto_items.exclude(id__in=ids_conservados).delete()
+
     def create(self, validated_data):
         equipo_ids = validated_data.pop('equipo', [])
+        items_data = validated_data.pop('presupuesto_items', [])
         proyecto = super().create(validated_data)
         for uid in equipo_ids:
             ProyectoEquipo.objects.get_or_create(proyecto=proyecto, usuario_id=uid)
+        self._sync_presupuesto_items(proyecto, items_data)
         return proyecto
 
     def update(self, instance, validated_data):
         equipo_ids = validated_data.pop('equipo', None)
+        items_data = validated_data.pop('presupuesto_items', None)
         proyecto = super().update(instance, validated_data)
         if equipo_ids is not None:
             proyecto.equipo.exclude(usuario_id__in=equipo_ids).delete()
             for uid in equipo_ids:
                 ProyectoEquipo.objects.get_or_create(proyecto=proyecto, usuario_id=uid)
+        self._sync_presupuesto_items(proyecto, items_data)
         return proyecto
 
     def validate(self, data):
@@ -89,17 +163,52 @@ class ProyectoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 'Seleccione solo un Área o una Secretaría, no ambos.'
             )
+        presupuesto_total = data.get(
+            'presupuesto_total',
+            getattr(self.instance, 'presupuesto_total', Decimal('0')),
+        )
+        fuente_financiamiento = data.get(
+            'fuente_financiamiento',
+            getattr(self.instance, 'fuente_financiamiento', Proyecto.FUENTE_PROVINCIAL),
+        )
+        items = data.get('presupuesto_items', None)
+        if self.instance is None and not items:
+            raise serializers.ValidationError({
+                'presupuesto_items': 'Debe cargar al menos un item presupuestario.'
+            })
+        if items is not None and len(items) == 0:
+            raise serializers.ValidationError({
+                'presupuesto_items': 'Debe cargar al menos un item presupuestario.'
+            })
+        if Decimal(str(presupuesto_total or 0)) < 0:
+            raise serializers.ValidationError({
+                'presupuesto_total': 'El presupuesto total no puede ser negativo.'
+            })
+        if (
+            fuente_financiamiento == Proyecto.FUENTE_SIN_EROGACION
+            and Decimal(str(presupuesto_total or 0)) != 0
+        ):
+            raise serializers.ValidationError({
+                'presupuesto_total': 'Si la fuente es Sin Erogacion, el presupuesto total debe ser 0.'
+            })
+        if items is not None:
+            total_items = sum(Decimal(str(item.get('monto') or 0)) for item in items)
+            if total_items > Decimal(str(presupuesto_total or 0)):
+                raise serializers.ValidationError({
+                    'presupuesto_items': 'La suma de los gastos no puede superar el presupuesto total del proyecto.'
+                })
         return data
 
     class Meta:
         model = Proyecto
         fields = [
             'id', 'nombre', 'descripcion', 'fecha_inicio', 'fecha_fin_estimada', 'fecha_fin_real',
-            'estado', 'porcentaje_avance', 'creado_por', 'fecha_creacion',
+            'estado', 'porcentaje_avance', 'presupuesto_total', 'fuente_financiamiento',
+            'creado_por', 'fecha_creacion',
             'programa', 'objetivo_estrategico',
             'usuario_responsable', 'usuario_responsable_nombre',
             'area', 'area_nombre', 'secretaria',
-            'equipo', 'equipo_nombres',
+            'equipo', 'equipo_nombres', 'presupuesto_items', 'presupuesto_cargado',
         ]
         read_only_fields = ['creado_por', 'fecha_creacion']
 

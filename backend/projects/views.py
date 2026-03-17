@@ -5,7 +5,7 @@ from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 from .models import (
     Eje, Plan, Programa, ObjetivoEstrategico, Indicador,
-    Proyecto, ProyectoArea, ProyectoEquipo, Etapa, ComentarioProyecto, AdjuntoProyecto,
+    Proyecto, ProyectoArea, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto,
     ComentarioAuditLog, AdjuntoAuditLog,
 )
 from .serializers import (
@@ -133,7 +133,8 @@ class ProyectoViewSet(viewsets.ModelViewSet):
     queryset = Proyecto.objects.select_related(
         'usuario_responsable', 'area', 'secretaria', 'creado_por'
     ).prefetch_related(
-        Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario'))
+        Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario')),
+        Prefetch('presupuesto_items', queryset=ProyectoPresupuestoItem.objects.order_by('orden', 'id')),
     ).order_by('id')
     serializer_class = ProyectoSerializer
 
@@ -173,6 +174,7 @@ class ProyectoViewSet(viewsets.ModelViewSet):
             'usuario_responsable', 'area', 'secretaria', 'creado_por'
         ).prefetch_related(
             Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario')),
+            Prefetch('presupuesto_items', queryset=ProyectoPresupuestoItem.objects.order_by('orden', 'id')),
             'proyectoarea_set__area',
         ).order_by('id')
         secretaria_id = self.request.query_params.get('secretaria')

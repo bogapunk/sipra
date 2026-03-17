@@ -34,6 +34,11 @@ const modoOrden = ref(false)
 const guardandoOrden = ref(false)
 const draggedTaskId = ref<number | null>(null)
 const dragOverTaskId = ref<number | null>(null)
+const currencyFormatter = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'ARS',
+  maximumFractionDigits: 2,
+})
 
 function puedeModificarAdjunto(a: Record<string, unknown>): boolean {
   if (!user.value) return false
@@ -50,6 +55,11 @@ function parseListResponse(payload: unknown): Record<string, unknown>[] {
     return Array.isArray(results) ? (results as Record<string, unknown>[]) : []
   }
   return []
+}
+
+function formatCurrency(value: unknown): string {
+  const amount = Number(value || 0)
+  return currencyFormatter.format(Number.isFinite(amount) ? amount : 0)
 }
 
 const load = async () => {
@@ -254,6 +264,17 @@ const tareasPorVencimiento = computed(() => {
 })
 
 const avanceGeneral = computed(() => Number(proyecto.value?.porcentaje_avance) || 0)
+const presupuestoItems = computed(() => {
+  const items = proyecto.value?.presupuesto_items
+  return Array.isArray(items) ? (items as Record<string, unknown>[]) : []
+})
+const presupuestoTotal = computed(() => Number(proyecto.value?.presupuesto_total) || 0)
+const presupuestoCargado = computed(() => Number(proyecto.value?.presupuesto_cargado) || 0)
+const presupuestoDisponible = computed(() => Math.max(0, presupuestoTotal.value - presupuestoCargado.value))
+const presupuestoEjecutadoPct = computed(() => {
+  if (!presupuestoTotal.value) return 0
+  return Math.max(0, Math.min(100, Math.round((presupuestoCargado.value / presupuestoTotal.value) * 100)))
+})
 
 const datosBarChart = computed(() => {
   const items = tareasParaTabla.value
@@ -283,6 +304,10 @@ async function exportarExcel() {
         descripcion: proyecto.value.descripcion as string,
         estado: proyecto.value.estado as string,
         porcentaje_avance: Number(proyecto.value.porcentaje_avance) || 0,
+        presupuesto_total: Number(proyecto.value.presupuesto_total) || 0,
+        fuente_financiamiento: proyecto.value.fuente_financiamiento as string,
+        presupuesto_cargado: presupuestoCargado.value,
+        presupuesto_disponible: presupuestoDisponible.value,
       },
       etapas.value as { id: number; nombre: string; orden?: number }[],
       indicadores.value as { id: number; descripcion?: string; unidad_medida?: string; frecuencia?: string }[],
@@ -290,6 +315,13 @@ async function exportarExcel() {
         tarea: item.tarea,
         esSubtarea: item.esSubtarea,
         orden: item.orden,
+      })),
+      presupuestoItems.value.map((item, index) => ({
+        id: item.id as number | undefined,
+        categoria_gasto: item.categoria_gasto as string | undefined,
+        monto: Number(item.monto) || 0,
+        detalle: item.detalle as string | undefined,
+        orden: (item.orden as number | undefined) ?? index + 1,
       })),
       `proyecto_${String(proyecto.value.nombre || 'proyecto').replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_').trim().slice(0, 80) || proyectoId}`
     )
@@ -386,6 +418,53 @@ watch(proyectoId, () => {
     </div>
     <p class="desc">{{ proyecto.descripcion }}</p>
     <p><strong>Estado:</strong> {{ proyecto.estado }} | <strong>Avance general:</strong> {{ avanceGeneral.toFixed(2) }}%</p>
+
+    <section class="section presupuesto-section">
+      <h2>Detalle presupuestario</h2>
+      <div class="presupuesto-layout">
+        <div class="presupuesto-chart-card">
+          <h3 class="grafico-titulo">Ejecución presupuestaria</h3>
+          <PieChart :value="presupuestoEjecutadoPct" label="Ejecutado" :size="150" />
+          <p class="presupuesto-chart-meta">
+            {{ formatCurrency(presupuestoCargado) }} de {{ formatCurrency(presupuestoTotal) }}
+          </p>
+        </div>
+        <div class="presupuesto-resumen-grid">
+          <div class="presupuesto-card">
+            <span class="presupuesto-label">Presupuesto total</span>
+            <strong class="presupuesto-value">{{ formatCurrency(presupuestoTotal) }}</strong>
+          </div>
+          <div class="presupuesto-card">
+            <span class="presupuesto-label">Fuente de financiamiento</span>
+            <strong class="presupuesto-value presupuesto-value-text">{{ proyecto.fuente_financiamiento || '-' }}</strong>
+          </div>
+          <div class="presupuesto-card">
+            <span class="presupuesto-label">Total gastos</span>
+            <strong class="presupuesto-value">{{ formatCurrency(presupuestoCargado) }}</strong>
+          </div>
+          <div class="presupuesto-card">
+            <span class="presupuesto-label">Disponible</span>
+            <strong class="presupuesto-value">{{ formatCurrency(presupuestoDisponible) }}</strong>
+          </div>
+        </div>
+      </div>
+      <div v-if="presupuestoItems.length" class="presupuesto-gastos-lista">
+        <article
+          v-for="(item, index) in presupuestoItems"
+          :key="(item.id as number) || `presupuesto-${index}`"
+          class="presupuesto-gasto-card"
+        >
+          <div class="presupuesto-gasto-head">
+            <strong>{{ item.categoria_gasto || `Gasto ${index + 1}` }}</strong>
+            <span>{{ formatCurrency(item.monto) }}</span>
+          </div>
+          <p class="presupuesto-gasto-detalle">
+            {{ item.detalle || 'Sin detalle cargado.' }}
+          </p>
+        </article>
+      </div>
+      <p v-else class="hint">No hay gastos presupuestarios cargados para este proyecto.</p>
+    </section>
 
     <!-- Gráficos de resumen -->
     <section class="section graficos-section">
@@ -808,6 +887,87 @@ watch(proyectoId, () => {
 .btn-actualizar:hover { background: #334155; }
 .btn-icon { width: 1rem; height: 1rem; }
 
+.presupuesto-section {
+  margin-top: 1.5rem;
+}
+.presupuesto-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 1rem;
+  align-items: stretch;
+  margin-top: 1rem;
+}
+.presupuesto-chart-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.presupuesto-chart-meta {
+  margin: 0.25rem 0 0;
+  color: #475569;
+  font-size: 0.9rem;
+}
+.presupuesto-resumen-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+.presupuesto-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.presupuesto-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.presupuesto-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+.presupuesto-value-text {
+  font-size: 1rem;
+}
+.presupuesto-gastos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+.presupuesto-gasto-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+}
+.presupuesto-gasto-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  color: #0f172a;
+}
+.presupuesto-gasto-detalle {
+  margin: 0.5rem 0 0;
+  color: #475569;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .graficos-section { margin-top: 2rem; }
 .graficos-grid {
   display: grid;
@@ -871,6 +1031,16 @@ watch(proyectoId, () => {
 .btn-ver-detalle:hover {
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+@media (max-width: 640px) {
+  .presupuesto-layout {
+    grid-template-columns: 1fr;
+  }
+  .presupuesto-gasto-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 </style>

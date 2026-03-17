@@ -41,18 +41,62 @@ const totalProyectos = ref(0)
 const soporteCargado = ref(false)
 let busquedaTimer: ReturnType<typeof setTimeout> | null = null
 type TipoDependencia = 'area' | 'secretaria'
+type CategoriaGasto = 'Equipamiento' | 'Gastos operativos y logisticos' | 'Dotacion'
+type FuenteFinanciamiento = 'Provincial' | 'Nacional' | 'CFI' | 'Otros' | 'Sin Erogacion'
+type PresupuestoItemForm = {
+  id: number | null
+  categoria_gasto: CategoriaGasto
+  monto: string
+  detalle: string
+  orden: number
+}
+
+const FUENTE_SIN_EROGACION: FuenteFinanciamiento = 'Sin Erogacion'
+const CATEGORIAS_GASTO: CategoriaGasto[] = ['Equipamiento', 'Gastos operativos y logisticos', 'Dotacion']
+const FUENTES_FINANCIAMIENTO: FuenteFinanciamiento[] = ['Provincial', 'Nacional', 'CFI', 'Otros', 'Sin Erogacion']
+const currencyFormatter = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'ARS',
+  maximumFractionDigits: 2,
+})
+
+function normalizarMontoInput(value: string | number | null | undefined): string {
+  const soloDigitos = String(value ?? '').replace(/\D/g, '')
+  if (!soloDigitos) return ''
+  return soloDigitos.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+
+function montoToNumber(value: string | number | null | undefined): number {
+  const limpio = String(value ?? '').replace(/\./g, '').replace(/\D/g, '')
+  return limpio ? Number(limpio) : 0
+}
+
+function crearItemPresupuesto(overrides: Partial<PresupuestoItemForm> = {}): PresupuestoItemForm {
+  return {
+    id: null,
+    categoria_gasto: 'Equipamiento',
+    monto: '',
+    detalle: '',
+    orden: 0,
+    ...overrides,
+  }
+}
+
 const form = ref({
   nombre: '',
   descripcion: '',
   fecha_inicio: '',
   fecha_fin_estimada: '',
   estado: 'Activo',
+  presupuesto_total: '',
+  fuente_financiamiento: 'Provincial' as FuenteFinanciamiento,
   creado_por: 1,
   usuario_responsable: null as number | null,
   tipoDependencia: 'area' as TipoDependencia,
   area_id: null as number | null,
   secretaria: null as number | null,
   equipo: [] as number[],
+  presupuesto_items: [crearItemPresupuesto()] as PresupuestoItemForm[],
 })
 const usuarios = ref<Record<string, unknown>[]>([])
 const usuariosParaResponsable = ref<Record<string, unknown>[]>([])
@@ -83,6 +127,133 @@ function hasNextPage(res: unknown): boolean {
   const raw = (res as { data?: unknown }).data
   return Boolean(raw && typeof raw === 'object' && 'next' in (raw as object) && (raw as { next?: unknown }).next)
 }
+
+function parseProyectoDetalle(res: unknown): Record<string, unknown> {
+  if (!res || typeof res !== 'object') return {}
+  const raw = (res as { data?: unknown }).data
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
+  return {}
+}
+
+function formatCurrency(value: number): string {
+  return currencyFormatter.format(Number.isFinite(value) ? value : 0)
+}
+
+function reordenarPresupuesto() {
+  form.value.presupuesto_items = form.value.presupuesto_items.map((item, index) => ({
+    ...item,
+    orden: index,
+  }))
+}
+
+function aplicarReglasPresupuesto(item: PresupuestoItemForm, index?: number) {
+  if (typeof index === 'number') item.orden = index
+  item.monto = normalizarMontoInput(item.monto)
+}
+
+function agregarItemPresupuesto() {
+  form.value.presupuesto_items.push(
+    crearItemPresupuesto({ orden: form.value.presupuesto_items.length }),
+  )
+}
+
+function eliminarItemPresupuesto(index: number) {
+  if (form.value.presupuesto_items.length === 1) {
+    form.value.presupuesto_items = [crearItemPresupuesto()]
+    return
+  }
+  form.value.presupuesto_items.splice(index, 1)
+  reordenarPresupuesto()
+}
+
+function onCategoriaPresupuestoChange(item: PresupuestoItemForm, index: number) {
+  aplicarReglasPresupuesto(item, index)
+}
+
+function onPresupuestoTotalInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  form.value.presupuesto_total = normalizarMontoInput(target.value)
+}
+
+function onMontoItemInput(event: Event, item: PresupuestoItemForm, index: number) {
+  const target = event.target as HTMLInputElement
+  item.monto = normalizarMontoInput(target.value)
+  aplicarReglasPresupuesto(item, index)
+}
+
+function mapPresupuestoItems(raw: unknown): PresupuestoItemForm[] {
+  if (!Array.isArray(raw) || !raw.length) return [crearItemPresupuesto()]
+  return raw.map((entry, index) => {
+    const item = entry as Record<string, unknown>
+    const mapped = crearItemPresupuesto({
+      id: typeof item.id === 'number' ? item.id : null,
+      categoria_gasto: (item.categoria_gasto as CategoriaGasto) || 'Equipamiento',
+      monto: normalizarMontoInput(item.monto as string | number | null | undefined),
+      detalle: String(item.detalle || ''),
+      orden: typeof item.orden === 'number' ? item.orden : index,
+    })
+    aplicarReglasPresupuesto(mapped, index)
+    return mapped
+  })
+}
+
+function buildPresupuestoPayload(): Record<string, unknown>[] | null {
+  if (!form.value.presupuesto_items.length) {
+    toast.error('Debe cargar al menos un item presupuestario.')
+    return null
+  }
+
+  const payload = form.value.presupuesto_items.map((item, index) => {
+    aplicarReglasPresupuesto(item, index)
+
+    const detalle = item.detalle.trim()
+    const monto = Math.max(0, montoToNumber(item.monto))
+
+    return {
+      id: item.id ?? undefined,
+      categoria_gasto: item.categoria_gasto,
+      monto,
+      detalle,
+      orden: index,
+    }
+  })
+
+  const primerInvalido = payload.find((item) => {
+    const monto = Number(item.monto || 0)
+    if (monto <= 0 && !String(item.detalle || '').trim()) return true
+    return false
+  })
+
+  if (primerInvalido) {
+    toast.error('Cada gasto debe tener un monto o un detalle descriptivo.')
+    return null
+  }
+
+  const totalGastos = payload.reduce((acc, item) => acc + (Number(item.monto || 0) || 0), 0)
+  const presupuestoTotal = Math.max(0, montoToNumber(form.value.presupuesto_total))
+  if (form.value.fuente_financiamiento === FUENTE_SIN_EROGACION && presupuestoTotal !== 0) {
+    toast.error('Si la fuente de financiamiento es Sin erogación, el presupuesto total debe ser 0.')
+    return null
+  }
+  if (totalGastos > presupuestoTotal) {
+    toast.error('La suma de los gastos no puede superar el presupuesto total del proyecto.')
+    return null
+  }
+
+  return payload
+}
+
+const presupuestoCargado = computed(() =>
+  form.value.presupuesto_items.reduce((acc, item) => {
+    aplicarReglasPresupuesto(item)
+    const monto = montoToNumber(item.monto)
+    return acc + (Number.isFinite(monto) ? monto : 0)
+  }, 0),
+)
+
+const presupuestoDisponible = computed(() =>
+  Math.max(0, montoToNumber(form.value.presupuesto_total) - presupuestoCargado.value),
+)
 
 function buildProjectParams(page = paginaActual.value): Record<string, string | number> {
   const secretariaId = route.query.secretaria as string | undefined
@@ -231,6 +402,12 @@ function dependenciaOrganizacional(p: Record<string, unknown>): { tipo: string; 
   return items
 }
 
+function presupuestoItemsProyecto(proyecto: Record<string, unknown> | null): Record<string, unknown>[] {
+  if (!proyecto) return []
+  const items = proyecto.presupuesto_items
+  return Array.isArray(items) ? (items as Record<string, unknown>[]) : []
+}
+
 async function descargarExcel() {
   const lista = await fetchAllPages('dashboard/proyectos/', buildProjectParams(1))
   const headers = ['Nombre', 'Dependencia organizacional', 'Avance %', 'Responsable', 'Estado', 'Fecha inicio', 'Fecha fin estimada', 'Descripción']
@@ -297,12 +474,15 @@ const openCreate = async () => {
     fecha_inicio: '',
     fecha_fin_estimada: '',
     estado: 'Activo',
+    presupuesto_total: '',
+    fuente_financiamiento: 'Provincial',
     creado_por: user.value?.id ?? 1,
     usuario_responsable: user.value?.id ?? null,
     tipoDependencia: tipoInicial,
     area_id: null,
     secretaria: tipoInicial === 'secretaria' ? secretariaId : null,
     equipo: [],
+    presupuesto_items: [crearItemPresupuesto()],
   }
   showForm.value = true
   loadUsuariosParaResponsable()
@@ -310,9 +490,19 @@ const openCreate = async () => {
 
 const openEdit = async (p: Record<string, unknown>) => {
   editingId.value = p.id as number
-  const secId = p.secretaria != null ? (typeof p.secretaria === 'object' ? (p.secretaria as { id?: number }).id : p.secretaria as number) : null
-  const areaDirect = p.area != null ? (typeof p.area === 'object' ? (p.area as { id?: number }).id : p.area as number) : null
-  const areasProy = p.areas_asignadas as string[] | undefined
+  const detalleRes = await api.get(`proyectos/${editingId.value}/`).catch(() => ({ data: p }))
+  const proyecto = { ...p, ...parseProyectoDetalle(detalleRes) }
+  const secId = proyecto.secretaria != null
+    ? (typeof proyecto.secretaria === 'object'
+      ? (proyecto.secretaria as { id?: number }).id
+      : proyecto.secretaria as number)
+    : null
+  const areaDirect = proyecto.area != null
+    ? (typeof proyecto.area === 'object'
+      ? (proyecto.area as { id?: number }).id
+      : proyecto.area as number)
+    : null
+  const areasProy = proyecto.areas_asignadas as string[] | undefined
   let areaIdResolved: number | null = areaDirect != null ? Number(areaDirect) : null
   if (!areaIdResolved && areasProy?.length && areas.value.length) {
     const primerArea = areas.value.find((a: Record<string, unknown>) =>
@@ -335,24 +525,33 @@ const openEdit = async (p: Record<string, unknown>) => {
     equipoIds = (eqRes.data || []).map((pe: Record<string, unknown>) => pe.usuario as number)
   } catch { /* ignorar */ }
   form.value = {
-    nombre: (p.nombre as string) || '',
-    descripcion: (p.descripcion as string) || '',
-    fecha_inicio: (p.fecha_inicio as string) || '',
-    fecha_fin_estimada: (p.fecha_fin_estimada as string) || '',
-    estado: (p.estado as string) || 'Activo',
-    creado_por: p.creado_por as number,
-    usuario_responsable: (p.usuario_responsable != null ? (typeof p.usuario_responsable === 'object' ? (p.usuario_responsable as { id?: number }).id : p.usuario_responsable) : p.creado_por) as number | null,
+    nombre: (proyecto.nombre as string) || '',
+    descripcion: (proyecto.descripcion as string) || '',
+    fecha_inicio: (proyecto.fecha_inicio as string) || '',
+    fecha_fin_estimada: (proyecto.fecha_fin_estimada as string) || '',
+    estado: (proyecto.estado as string) || 'Activo',
+    presupuesto_total: normalizarMontoInput(proyecto.presupuesto_total as string | number | null | undefined),
+    fuente_financiamiento: (proyecto.fuente_financiamiento as FuenteFinanciamiento) || 'Provincial',
+    creado_por: proyecto.creado_por as number,
+    usuario_responsable: (
+      proyecto.usuario_responsable != null
+        ? (typeof proyecto.usuario_responsable === 'object'
+          ? (proyecto.usuario_responsable as { id?: number }).id
+          : proyecto.usuario_responsable)
+        : proyecto.creado_por
+    ) as number | null,
     tipoDependencia: tipo,
     area_id: tipo === 'area' ? areaIdResolved : null,
     secretaria: tipo === 'secretaria' ? secId : null,
     equipo: equipoIds,
+    presupuesto_items: mapPresupuestoItems(proyecto.presupuesto_items),
   }
   showForm.value = true
   loadUsuariosParaResponsable()
 }
 
 const save = async () => {
-  const { tipoDependencia, area_id, equipo, usuario_responsable, ...rest } = form.value
+  const { tipoDependencia, area_id, equipo, usuario_responsable, presupuesto_items, ...rest } = form.value
   if (tipoDependencia === 'area' && !area_id) {
     toast.error('Seleccione un área para el proyecto.')
     return
@@ -371,12 +570,16 @@ const save = async () => {
       return
     }
   }
+  const presupuestoPayload = buildPresupuestoPayload()
+  if (!presupuestoPayload) return
   const payload = {
     ...rest,
+    presupuesto_total: montoToNumber(form.value.presupuesto_total),
     usuario_responsable: usuario_responsable,
     area: tipoDependencia === 'area' ? area_id : null,
     secretaria: tipoDependencia === 'secretaria' ? form.value.secretaria : null,
     equipo: equipo || [],
+    presupuesto_items: presupuestoPayload,
   }
   try {
     if (editingId.value) {
@@ -417,8 +620,9 @@ const secretariasActivas = computed(() =>
   secretarias.value.filter((s: Record<string, unknown>) => s.activa !== false)
 )
 
-const openVer = (p: Record<string, unknown>) => {
-  proyectoVer.value = p
+const openVer = async (p: Record<string, unknown>) => {
+  const detalleRes = await api.get(`proyectos/${p.id}/`).catch(() => ({ data: p }))
+  proyectoVer.value = { ...p, ...parseProyectoDetalle(detalleRes) }
   showVerModal.value = true
 }
 
@@ -671,7 +875,7 @@ watch(buscarProyecto, () => {
     />
 
     <div v-if="showForm" class="modal-overlay" @click.self="closeForm">
-      <div class="modal">
+      <div class="modal modal-proyecto">
         <h2>{{ editingId ? 'Editar' : 'Nuevo' }} proyecto</h2>
         <form @submit.prevent="save">
           <label>Nombre</label>
@@ -688,6 +892,95 @@ watch(buscarProyecto, () => {
             <option value="En pausa">En pausa</option>
             <option value="Finalizado">Finalizado</option>
           </select>
+
+          <section class="form-section">
+            <div class="form-section-header">
+              <div>
+                <h3>Matriz presupuestaria</h3>
+                <p class="hint">Defina el presupuesto total, la fuente y luego agregue los gastos asociados.</p>
+              </div>
+              <button type="button" class="btn-inline-add" @click="agregarItemPresupuesto">
+                Agregar gasto
+              </button>
+            </div>
+            <div class="budget-summary-grid">
+              <div>
+                <label>Presupuesto total del proyecto</label>
+                <input
+                  :value="form.presupuesto_total"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="Ej: 79.333.098"
+                  @input="onPresupuestoTotalInput"
+                />
+              </div>
+              <div>
+                <label>Fuente de financiamiento</label>
+                <select v-model="form.fuente_financiamiento">
+                  <option v-for="fuente in FUENTES_FINANCIAMIENTO" :key="fuente" :value="fuente">
+                    {{ fuente }}
+                  </option>
+                </select>
+              </div>
+            </div>
+            <div class="budget-total">
+              <span>Total cargado en gastos</span>
+              <strong>{{ formatCurrency(presupuestoCargado) }}</strong>
+            </div>
+            <div class="budget-total budget-total-secondary">
+              <span>Disponible</span>
+              <strong>{{ formatCurrency(presupuestoDisponible) }}</strong>
+            </div>
+            <div class="budget-list">
+              <article
+                v-for="(item, index) in form.presupuesto_items"
+                :key="item.id ?? `presupuesto-${index}`"
+                class="budget-item-card"
+              >
+                <div class="budget-item-head">
+                  <strong>Item {{ index + 1 }}</strong>
+                  <button type="button" class="btn-link-danger" @click="eliminarItemPresupuesto(index)">
+                    Eliminar
+                  </button>
+                </div>
+                <div class="budget-grid">
+                  <div>
+                    <label>Categoría de gasto</label>
+                    <select v-model="item.categoria_gasto" @change="onCategoriaPresupuestoChange(item, index)">
+                      <option v-for="categoria in CATEGORIAS_GASTO" :key="categoria" :value="categoria">
+                        {{ categoria }}
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Monto ($)</label>
+                    <input
+                      :value="item.monto"
+                      type="text"
+                      inputmode="numeric"
+                      placeholder="Ej: 1.200.000"
+                      @input="onMontoItemInput($event, item, index)"
+                    />
+                  </div>
+                  <div class="budget-grid-span">
+                    <label>Detalle / Observación</label>
+                    <input
+                      v-model="item.detalle"
+                      type="text"
+                      :placeholder="item.categoria_gasto === 'Gastos operativos y logisticos' ? 'Ej: Traslado Ush-Tolh-RG' : 'Detalle u observación'"
+                    />
+                  </div>
+                </div>
+                <p
+                  v-if="!montoToNumber(item.monto) && item.detalle"
+                  class="budget-note"
+                >
+                  Este gasto se registrará como descriptivo, sin impacto monetario directo.
+                </p>
+              </article>
+            </div>
+          </section>
+
           <label>Dependencia organizacional</label>
           <div class="tipo-dependencia-selector">
             <label class="tipo-opt">
@@ -807,6 +1100,41 @@ watch(buscarProyecto, () => {
               >
                 {{ d.tipo }}: {{ d.nombre }}
               </span>
+            </div>
+          </div>
+          <div class="detalle-row">
+            <span class="detalle-label">Presupuesto</span>
+            <div class="detalle-presupuesto">
+              <div class="detalle-presupuesto-resumen">
+                <div class="detalle-row">
+                  <span class="detalle-label">Presupuesto total</span>
+                  <span class="detalle-valor">{{ formatCurrency(Number(proyectoVer.presupuesto_total) || 0) }}</span>
+                </div>
+                <div class="detalle-row">
+                  <span class="detalle-label">Fuente de financiamiento</span>
+                  <span class="detalle-valor">{{ proyectoVer.fuente_financiamiento || '-' }}</span>
+                </div>
+                <div class="detalle-row">
+                  <span class="detalle-label">Total cargado</span>
+                  <span class="detalle-valor">{{ formatCurrency(Number(proyectoVer.presupuesto_cargado) || 0) }}</span>
+                </div>
+              </div>
+              <div v-if="presupuestoItemsProyecto(proyectoVer).length" class="detalle-presupuesto-gastos">
+                <div
+                  v-for="(item, index) in presupuestoItemsProyecto(proyectoVer)"
+                  :key="item.id ?? `ver-presupuesto-${index}`"
+                  class="detalle-presupuesto-item"
+                >
+                  <div class="detalle-presupuesto-item-head">
+                    <strong>{{ item.categoria_gasto || `Gasto ${index + 1}` }}</strong>
+                    <span>{{ formatCurrency(Number(item.monto) || 0) }}</span>
+                  </div>
+                  <p class="detalle-presupuesto-texto">
+                    {{ item.detalle || 'Sin observaciones cargadas.' }}
+                  </p>
+                </div>
+              </div>
+              <p v-else class="detalle-presupuesto-vacio">No hay gastos presupuestarios cargados.</p>
             </div>
           </div>
         </div>
@@ -998,12 +1326,105 @@ watch(buscarProyecto, () => {
   max-width: 400px;
   width: 90%;
 }
+.modal-proyecto {
+  max-width: 980px;
+  max-height: min(90vh, 960px);
+  overflow-y: auto;
+}
 .modal h2 { margin-bottom: 1rem; }
 .modal form { display: flex; flex-direction: column; gap: 0.5rem; }
 .modal input, .modal select, .modal textarea {
   padding: 0.5rem;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
+}
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.form-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+.form-section-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+.btn-inline-add,
+.btn-link-danger {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn-inline-add {
+  color: #2563eb;
+}
+.btn-link-danger {
+  color: #b91c1c;
+}
+.budget-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: #eef6ff;
+  color: #0f172a;
+}
+.budget-total-secondary {
+  background: #f8fafc;
+}
+.budget-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+.budget-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.budget-item-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid #dbe5f0;
+  border-radius: 12px;
+  background: #fff;
+}
+.budget-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.budget-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+.budget-grid-span {
+  grid-column: 1 / -1;
+}
+.budget-flag {
+  display: flex;
+  align-items: center;
+}
+.budget-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #64748b;
 }
 .tipo-dependencia-selector {
   display: flex;
@@ -1167,6 +1588,74 @@ a:hover { text-decoration: underline; }
 .detalle-valor { font-size: 0.95rem; color: #1e293b; }
 .detalle-desc { white-space: pre-wrap; line-height: 1.5; }
 .detalle-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+.detalle-presupuesto {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.detalle-presupuesto-resumen {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.detalle-presupuesto-gastos {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.detalle-presupuesto-item {
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+.detalle-presupuesto-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  color: #0f172a;
+}
+.detalle-presupuesto-texto {
+  margin: 0.5rem 0 0;
+  color: #475569;
+  line-height: 1.45;
+}
+.detalle-presupuesto-vacio {
+  margin: 0;
+  color: #64748b;
+}
+
+@media (max-width: 900px) {
+  .budget-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .detalle-presupuesto-resumen {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .modal-proyecto {
+    width: min(96vw, 96vw);
+    padding: 1rem;
+  }
+  .form-section-header,
+  .budget-item-head,
+  .budget-total {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .budget-summary-grid,
+  .budget-grid,
+  .detalle-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* Indicadores de vencimiento por color */
 .vencimiento-vencida { background-color: #fef2f2 !important; border-left: 4px solid #dc2626; }

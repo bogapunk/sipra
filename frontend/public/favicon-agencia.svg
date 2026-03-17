@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Agencia de Innovacion TDF">
+  <defs>
+    <linearGradient id="agencyGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d47a1" />
+      <stop offset="100%" stop-color="#1565c0" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#agencyGradient)" />
+  <path
+    d="M18 46 30 16h4l12 30h-6.2l-2.5-6.6H26.7L24.2 46H18Zm10.7-11.7h6.6L32 25.5l-3.3 8.8Z"
+    fill="#ffffff"
+  />
+  <rect x="44" y="18" width="4" height="28" rx="2" fill="#ffffff" opacity="0.92" />
+</svg>

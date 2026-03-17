@@ -69,6 +69,18 @@ class Proyecto(models.Model):
         ("En pausa", "En pausa"),
         ("Finalizado", "Finalizado"),
     ]
+    FUENTE_PROVINCIAL = "Provincial"
+    FUENTE_NACIONAL = "Nacional"
+    FUENTE_CFI = "CFI"
+    FUENTE_OTROS = "Otros"
+    FUENTE_SIN_EROGACION = "Sin Erogacion"
+    FUENTES_FINANCIAMIENTO = [
+        (FUENTE_PROVINCIAL, "Provincial"),
+        (FUENTE_NACIONAL, "Nacional"),
+        (FUENTE_CFI, "CFI"),
+        (FUENTE_OTROS, "Otros"),
+        (FUENTE_SIN_EROGACION, "Sin Erogacion"),
+    ]
 
     nombre = models.CharField(max_length=150)
     descripcion = models.TextField(blank=True)
@@ -77,6 +89,10 @@ class Proyecto(models.Model):
     fecha_fin_real = models.DateField(null=True, blank=True)
     estado = models.CharField(max_length=20, choices=ESTADOS, default="Activo")
     porcentaje_avance = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    presupuesto_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    fuente_financiamiento = models.CharField(
+        max_length=20, choices=FUENTES_FINANCIAMIENTO, default=FUENTE_PROVINCIAL
+    )
     creado_por = models.ForeignKey(Usuario, on_delete=models.PROTECT)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     programa = models.ForeignKey(
@@ -115,6 +131,58 @@ class Proyecto(models.Model):
             models.Index(fields=["area", "estado"], name="proy_area_estado_idx"),
             models.Index(fields=["secretaria", "estado"], name="proy_sec_estado_idx"),
         ]
+
+
+class ProyectoPresupuestoItem(models.Model):
+    CATEGORIA_EQUIPAMIENTO = "Equipamiento"
+    CATEGORIA_OPERATIVOS = "Gastos operativos y logisticos"
+    CATEGORIA_DOTACION = "Dotacion"
+    CATEGORIAS_GASTO = [
+        (CATEGORIA_EQUIPAMIENTO, "Equipamiento"),
+        (CATEGORIA_OPERATIVOS, "Gastos operativos y logisticos"),
+        (CATEGORIA_DOTACION, "Dotacion"),
+    ]
+
+    DOTACION_PERSONAL_PROPIO = "Personal Propio"
+    DOTACION_CONTRATACION_EXTERNA = "Contratacion Externa"
+    DOTACION_TIPOS = [
+        (DOTACION_PERSONAL_PROPIO, "Personal Propio"),
+        (DOTACION_CONTRATACION_EXTERNA, "Contratacion Externa"),
+    ]
+
+    proyecto = models.ForeignKey(
+        Proyecto, on_delete=models.CASCADE, related_name="presupuesto_items", db_constraint=False
+    )
+    categoria_gasto = models.CharField(max_length=30, choices=CATEGORIAS_GASTO)
+    monto = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    detalle = models.CharField(max_length=255, blank=True)
+    numero_expediente = models.CharField(max_length=100, blank=True)
+    es_viaticos = models.BooleanField(default=False)
+    dotacion_tipo = models.CharField(max_length=30, choices=DOTACION_TIPOS, blank=True)
+    horas_hombre = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    orden = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["orden", "id"]
+        verbose_name = "Item presupuestario"
+        verbose_name_plural = "Items presupuestarios"
+        indexes = [
+            models.Index(fields=["proyecto", "orden"], name="proy_pres_item_ord_idx"),
+            models.Index(fields=["categoria_gasto"], name="proy_pres_cat_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(monto__gte=0),
+                name="proy_pres_monto_gte_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(horas_hombre__isnull=True) | models.Q(horas_hombre__gte=0),
+                name="proy_pres_horas_gte_0",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.proyecto_id} - {self.categoria_gasto}"
 
 
 class Indicador(models.Model):

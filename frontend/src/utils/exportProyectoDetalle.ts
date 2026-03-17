@@ -5,6 +5,10 @@ interface ProyectoData {
   descripcion?: string
   estado?: string
   porcentaje_avance?: number
+  presupuesto_total?: number
+  fuente_financiamiento?: string
+  presupuesto_cargado?: number
+  presupuesto_disponible?: number
 }
 
 interface Etapa {
@@ -33,11 +37,43 @@ interface TareaItem {
   orden: string
 }
 
+interface PresupuestoItem {
+  id?: number
+  categoria_gasto?: string
+  monto?: number
+  detalle?: string
+  orden?: number
+}
+
+function estadoVencimientoExport(fecha?: string, estado?: string): 'vencida' | 'proxima' | 'dentro-plazo' | 'sin-fecha' {
+  if (estado === 'Finalizada' || estado === 'Finalizado') return 'dentro-plazo'
+  if (!fecha) return 'sin-fecha'
+  const fechaDate = new Date(fecha)
+  if (Number.isNaN(fechaDate.getTime())) return 'sin-fecha'
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  fechaDate.setHours(0, 0, 0, 0)
+  const limite = new Date(hoy)
+  limite.setDate(limite.getDate() + 7)
+  if (fechaDate < hoy) return 'vencida'
+  if (fechaDate <= limite) return 'proxima'
+  return 'dentro-plazo'
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat('es-AR', {
+    style: 'currency',
+    currency: 'ARS',
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0)
+}
+
 export async function exportarProyectoDetalle(
   proyecto: ProyectoData,
   etapas: Etapa[],
   indicadores: Indicador[],
   tareas: TareaItem[],
+  presupuestoItems: PresupuestoItem[],
   filename: string
 ): Promise<void> {
   const wb = new ExcelJS.Workbook()
@@ -65,7 +101,94 @@ export async function exportarProyectoDetalle(
   ws.addRow(['Estado', proyecto.estado || ''])
   row++
   ws.addRow(['Avance general (%)', String(proyecto.porcentaje_avance ?? 0)])
+  row++
+  ws.addRow(['Presupuesto total', formatCurrency(Number(proyecto.presupuesto_total ?? 0))])
+  row++
+  ws.addRow(['Fuente de financiamiento', proyecto.fuente_financiamiento || ''])
+  row++
+  ws.addRow(['Total cargado', formatCurrency(Number(proyecto.presupuesto_cargado ?? 0))])
+  row++
+  ws.addRow(['Disponible', formatCurrency(Number(proyecto.presupuesto_disponible ?? 0))])
   row += 2
+
+  // Presupuesto
+  ws.addRow(['Detalle presupuestario'])
+  ws.getRow(row).font = { bold: true, size: 12 }
+  row++
+  if (presupuestoItems.length) {
+    ws.addRow(['Orden', 'Categoría', 'Monto', 'Detalle / Observación'])
+    ws.getRow(row).eachCell((c) => { c.font = { bold: true }; c.fill = headerStyle.fill })
+    row++
+    presupuestoItems.forEach((item, index) => {
+      ws.addRow([
+        item.orden ?? index + 1,
+        item.categoria_gasto || '',
+        formatCurrency(Number(item.monto ?? 0)),
+        item.detalle || '',
+      ])
+      row++
+    })
+  } else {
+    ws.addRow(['Sin detalle presupuestario'])
+    row++
+  }
+  row++
+
+  // Resumen visual
+  const resumenVencimiento = tareas.reduce(
+    (acc, item) => {
+      const t = item.tarea || {}
+      const estado = estadoVencimientoExport(
+        typeof t.fecha_vencimiento === 'string' ? t.fecha_vencimiento : undefined,
+        typeof t.estado === 'string' ? t.estado : undefined,
+      )
+      if (estado === 'vencida') acc.vencidas += 1
+      else if (estado === 'proxima') acc.proximas += 1
+      else if (estado === 'dentro-plazo') acc.dentro += 1
+      else acc.sinFecha += 1
+      return acc
+    },
+    { vencidas: 0, proximas: 0, dentro: 0, sinFecha: 0 },
+  )
+
+  ws.addRow(['Resumen visual'])
+  ws.getRow(row).font = { bold: true, size: 12 }
+  row++
+  ws.addRow(['Indicador', 'Valor'])
+  ws.getRow(row).eachCell((c) => { c.font = { bold: true }; c.fill = headerStyle.fill })
+  row++
+  ws.addRow(['Avance general (%)', String(proyecto.porcentaje_avance ?? 0)])
+  row++
+  ws.addRow(['Tareas vencidas', String(resumenVencimiento.vencidas)])
+  row++
+  ws.addRow(['Tareas próximas a vencer', String(resumenVencimiento.proximas)])
+  row++
+  ws.addRow(['Tareas dentro del plazo', String(resumenVencimiento.dentro)])
+  row++
+  ws.addRow(['Tareas sin fecha', String(resumenVencimiento.sinFecha)])
+  row += 2
+
+  ws.addRow(['Avance por tarea (datos del gráfico)'])
+  ws.getRow(row).font = { bold: true, size: 12 }
+  row++
+  ws.addRow(['Orden', 'Título', 'Avance %'])
+  ws.getRow(row).eachCell((c) => { c.font = { bold: true }; c.fill = headerStyle.fill })
+  row++
+  if (tareas.length) {
+    tareas.forEach((item) => {
+      const t = item.tarea as Record<string, unknown>
+      ws.addRow([
+        item.orden,
+        t.titulo || '',
+        String(t.porcentaje_avance ?? 0),
+      ])
+      row++
+    })
+  } else {
+    ws.addRow(['—', 'Sin tareas', '0'])
+    row++
+  }
+  row++
 
   // Etapas
   ws.addRow(['Etapas'])
