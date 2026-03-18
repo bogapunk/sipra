@@ -46,10 +46,8 @@ const submit = async () => {
     }
   } catch (e: unknown) {
     const err = e as { response?: { data?: { error?: string; code?: string }; status?: number }; code?: string; message?: string }
-    if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
-      error.value = 'No se pudo conectar al servidor. Verifique que el backend esté iniciado y que PostgreSQL esté disponible.'
-    } else if (err.response?.status === 503 || err.response?.data?.code === 'db_unavailable') {
-      error.value = 'No hay conexión con la base de datos PostgreSQL. Revise la base antes de iniciar sesión.'
+    if (!err.response || err.code === 'ERR_NETWORK' || err.message?.includes('Network Error') || err.response?.status === 503 || err.response?.data?.code === 'db_unavailable') {
+      error.value = 'Error de conexión: No se pudo establecer comunicación con el servidor de datos. Por favor, intente nuevamente en unos minutos o contacte al soporte técnico.'
     } else {
       error.value = err.response?.data?.error || 'Credenciales incorrectas.'
     }
