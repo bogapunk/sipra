@@ -1,5 +1,9 @@
 # Override para producción: PostgreSQL externo en 10.1.9.194, puerto 8081
 # Usar con: docker-compose -f docker-compose.yml -f docker-compose.produccion.yml up -d
+#
+# Frontend con volumen: vincula el directorio ./frontend para actualizar sin rebuild.
+# Flujo tras git pull: docker compose -f docker-compose.yml -f docker-compose.produccion.yml up -d --force-recreate frontend
+# El contenedor reconstruye el frontend al iniciar (npm ci, npm run build) y sirve la nueva versión.
 
 services:
   db:
@@ -24,5 +28,11 @@ services:
       CSRF_TRUSTED_ORIGINS: http://10.1.9.194:8081
 
   frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.produccion
+    volumes:
+      # Vincula el directorio frontend para actualizar con git pull sin rebuild de imagen
+      - ./frontend:/app
     ports:
       - "8081:80"

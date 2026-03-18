@@ -88,3 +88,29 @@ Los datos de PostgreSQL se guardan en el volumen `postgres_data`. Aunque elimine
 ```bash
 docker compose down -v
 ```
+
+## Producción con PostgreSQL externo
+
+Usa `docker-compose.produccion.yml` para conectar a una base PostgreSQL externa:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.produccion.yml up -d --build
+```
+
+El frontend se expone en el puerto **8081**.
+
+### Actualizar frontend sin rebuild (volumen vinculado)
+
+El `docker-compose.produccion.yml` monta el directorio `./frontend` como volumen. Así puedes actualizar el sistema tras un `git pull` **sin reconstruir la imagen Docker**:
+
+1. En el servidor, actualiza el código:
+   ```bash
+   git pull
+   ```
+
+2. Reinicia solo el contenedor frontend (reconstruye el frontend al iniciar):
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.produccion.yml up -d --force-recreate frontend
+   ```
+
+El contenedor ejecutará `npm ci` y `npm run build` al arrancar y servirá la nueva versión. No hace falta `docker build` ni reconstruir la imagen.
