@@ -1,46 +1,30 @@
-# Producción: PostgreSQL en el mismo stack (puerto 8085)
+# Producción: PostgreSQL en host (puerto 5433), app en puerto 8085
 # Usar con: docker-compose -f docker-compose.produccion.yml up -d
 #
-# BD: servicio db interno en la misma red. Credenciales desde .env.
-# BD externa: defina PROD_DATABASE_URL en .env para usar 10.1.9.194 u otro host.
+# BD: PostgreSQL en el host con -p 5433:5432, user admin, pass qlwpuc#EEVfs6zY4
+# host.docker.internal permite al backend conectar al host desde Linux
 
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB_NAME:-sipra}
-      POSTGRES_USER: ${POSTGRES_DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_DB_PASSWORD:-30153846}
-    volumes:
-      - postgres_data_prod:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_DB_USER:-postgres} -d ${POSTGRES_DB_NAME:-sipra}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DB_PROVIDER: postgres
-      DATABASE_URL: ${PROD_DATABASE_URL:-postgresql://${POSTGRES_DB_USER:-postgres}:${POSTGRES_DB_PASSWORD:-30153846}@db:5432/${POSTGRES_DB_NAME:-sipra}}
-      POSTGRES_DB_HOST: db
-      POSTGRES_DB_PORT: 5432
-      POSTGRES_DB_NAME: ${POSTGRES_DB_NAME:-sipra}
-      POSTGRES_DB_USER: ${POSTGRES_DB_USER:-postgres}
-      POSTGRES_DB_PASSWORD: ${POSTGRES_DB_PASSWORD:-30153846}
+      DATABASE_URL: "postgresql://admin:qlwpuc%23EEVfs6zY4@host.docker.internal:5433/sipra"
+      POSTGRES_DB_HOST: host.docker.internal
+      POSTGRES_DB_PORT: 5433
+      POSTGRES_DB_NAME: sipra
+      POSTGRES_DB_USER: admin
+      POSTGRES_DB_PASSWORD: "qlwpuc#EEVfs6zY4"
       DEBUG: "0"
       SECRET_KEY: ${SECRET_KEY:-sipra-produccion-clave-segura-cambiar}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-10.1.9.194,localhost,127.0.0.1}
+      ALLOWED_HOSTS: 10.1.9.194,localhost,127.0.0.1
       CORS_ALLOW_ALL_ORIGINS: "0"
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://10.1.9.194:8085}
-      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://10.1.9.194:8085}
-    depends_on:
-      db:
-        condition: service_healthy
+      CORS_ALLOWED_ORIGINS: http://10.1.9.194:8085
+      CSRF_TRUSTED_ORIGINS: http://10.1.9.194:8085
     restart: unless-stopped
 
   frontend:
@@ -50,10 +34,7 @@ services:
     volumes:
       - ./frontend:/app
     ports:
-      - "0.0.0.0:8085:80"  # Escuchar en todas las interfaces
+      - "0.0.0.0:8085:80"
     depends_on:
       - backend
     restart: unless-stopped
-
-volumes:
-  postgres_data_prod:
