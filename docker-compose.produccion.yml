@@ -1,20 +1,17 @@
-# Producción: PostgreSQL en host (puerto 5433), app en puerto 8085
+# Producción: PostgreSQL en contenedor "postgres" (-p 5433:5432), app en 8085
 # Usar con: docker-compose -f docker-compose.produccion.yml up -d
 #
-# BD: PostgreSQL en el host con -p 5433:5432, user admin, pass qlwpuc#EEVfs6zY4
-# host.docker.internal permite al backend conectar al host desde Linux
+# BD: PostgreSQL en puerto 5433 del host. Usa 10.1.9.194 (IP del servidor).
 
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       DB_PROVIDER: postgres
-      DATABASE_URL: "postgresql://admin:qlwpuc%23EEVfs6zY4@host.docker.internal:5433/sipra"
-      POSTGRES_DB_HOST: host.docker.internal
+      DATABASE_URL: "postgresql://admin:qlwpuc%23EEVfs6zY4@10.1.9.194:5433/sipra"
+      POSTGRES_DB_HOST: 10.1.9.194
       POSTGRES_DB_PORT: 5433
       POSTGRES_DB_NAME: sipra
       POSTGRES_DB_USER: admin
