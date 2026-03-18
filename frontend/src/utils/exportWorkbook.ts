@@ -16,7 +16,7 @@ async function loadExcelJs() {
 async function baseWorkbook(title: string) {
   const { default: ExcelJS } = await loadExcelJs()
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'SIPRA'
+  workbook.creator = 'SIP-AIF'
   workbook.created = new Date()
   workbook.modified = new Date()
   workbook.subject = title

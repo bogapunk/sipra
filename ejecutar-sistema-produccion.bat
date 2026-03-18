@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title SIPRA - Producción (10.1.9.194:8081)
+title SIP-AIF - Producción (10.1.9.194:8081)
 
 echo ==============================================
-echo   SIPRA - Entorno de PRODUCCIÓN
+echo   SIP-AIF - Entorno de PRODUCCIÓN
 echo ==============================================
 echo.
 echo Servidor: 10.1.9.194
@@ -69,7 +69,7 @@ timeout /t 10 /nobreak >nul
 
 echo.
 echo ==============================================
-echo   SIPRA en producción - INICIADO
+echo   SIP-AIF en producción - INICIADO
 echo ==============================================
 echo.
 echo Acceso a la aplicación: http://%IP_APLICACION%:%PUERTO_APLICACION%

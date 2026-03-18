@@ -22,7 +22,8 @@ withDefaults(defineProps<{
 <style scoped>
 .app-footer {
   margin-top: auto;
-  padding: 1.25rem 1.5rem;
+  padding: clamp(1rem, 2.5vw, 1.5rem) clamp(1rem, 3vw, 1.5rem);
+  flex-shrink: 0;
 }
 .footer-content {
   display: flex;
@@ -33,16 +34,18 @@ withDefaults(defineProps<{
   gap: 0.5rem;
 }
 .footer-logo {
-  height: 40px;
+  height: clamp(32px, 8vw, 40px);
   width: auto;
+  max-width: 100%;
   object-fit: contain;
   opacity: 0.95;
 }
 .footer-copyright {
-  font-size: 0.8rem;
+  font-size: clamp(0.7rem, 2vw, 0.8rem);
   margin: 0;
   letter-spacing: 0.02em;
   font-weight: 400;
+  line-height: 1.4;
 }
 
 /* Variante para paneles (con fondo) */
@@ -57,7 +60,7 @@ withDefaults(defineProps<{
 /* Variante para login (elegante, sin caja) */
 .footer-login {
   background: transparent;
-  padding: 1.5rem;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
 }
 .footer-login .footer-logo {
   filter: brightness(0) invert(1);
@@ -65,15 +68,19 @@ withDefaults(defineProps<{
 }
 .footer-login .footer-copyright {
   color: rgba(255, 255, 255, 0.85);
-  font-size: 0.75rem;
+  font-size: clamp(0.65rem, 1.8vw, 0.75rem);
 }
 
-@media (max-width: 768px) {
-  .app-footer {
-    padding: 1rem;
-  }
+@media (max-width: 480px) {
   .footer-copyright {
-    font-size: 0.75rem;
+    max-width: 90%;
+    word-break: break-word;
+  }
+}
+
+@supports (padding: max(0px)) {
+  .app-footer {
+    padding-bottom: max(clamp(1rem, 2.5vw, 1.5rem), env(safe-area-inset-bottom));
   }
 }
 </style>

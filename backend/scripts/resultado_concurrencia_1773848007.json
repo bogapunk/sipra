@@ -1,0 +1,85 @@
+{
+  "requests_total": 450,
+  "requests_ok": 450,
+  "requests_error": 0,
+  "success_rate_pct": 100.0,
+  "avg_ms": 3618.92,
+  "p50_ms": 2681.5,
+  "p95_ms": 7697.83,
+  "p99_ms": 8897.21,
+  "max_ms": 9127.45,
+  "by_endpoint": {
+    "auth/login/": {
+      "requests": 30,
+      "ok": 30,
+      "errors": 0,
+      "avg_ms": 5675.43,
+      "p95_ms": 6656.47,
+      "max_ms": 6684.39
+    },
+    "auth/me/": {
+      "requests": 60,
+      "ok": 60,
+      "errors": 0,
+      "avg_ms": 2293.71,
+      "p95_ms": 2735.05,
+      "max_ms": 2942.9
+    },
+    "dashboard/analitico/": {
+      "requests": 60,
+      "ok": 60,
+      "errors": 0,
+      "avg_ms": 2626.05,
+      "p95_ms": 3233.82,
+      "max_ms": 3319.35
+    },
+    "dashboard/proyectos/": {
+      "requests": 60,
+      "ok": 60,
+      "errors": 0,
+      "avg_ms": 5350.71,
+      "p95_ms": 8948.28,
+      "max_ms": 9127.45
+    },
+    "proyectos/": {
+      "requests": 60,
+      "ok": 60,
+      "errors": 0,
+      "avg_ms": 6072.47,
+      "p95_ms": 7470.1,
+      "max_ms": 7506.25
+    },
+    "tareas/": {
+      "requests": 60,
+      "ok": 60,
+      "errors": 0,
+      "avg_ms": 2924.17,
+      "p95_ms": 3434.42,
+      "max_ms": 3518.23
+    },
+    "avances/por-area/": {
+      "requests": 60,
+      "ok": 60,
+      "errors": 0,
+      "avg_ms": 2585.05,
+      "p95_ms": 3100.19,
+      "max_ms": 3302.21
+    },
+    "avances/por-secretaria/": {
+      "requests": 60,
+      "ok": 60,
+      "errors": 0,
+      "avg_ms": 2452.03,
+      "p95_ms": 3213.2,
+      "max_ms": 3416.07
+    }
+  },
+  "sample_errors": [],
+  "config": {
+    "base_url": "http://localhost:8001",
+    "virtual_users": 30,
+    "iterations": 2,
+    "workers": 30,
+    "elapsed_s": 57.78
+  }
+}

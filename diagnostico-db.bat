@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title SIPRA - Diagnostico DB
+title SIP-AIF - Diagnostico DB
 
 echo ==============================================
-echo   SIPRA - Diagnostico de conexion PostgreSQL
+echo   SIP-AIF - Diagnostico de conexion PostgreSQL
 echo ==============================================
 echo.
 

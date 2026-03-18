@@ -17,6 +17,7 @@ import { useToast } from '@/composables/useToast'
 import { invalidateApiCache } from '@/services/api'
 import { useModalClose } from '@/composables/useModalClose'
 import { estadoVencimiento, claseVencimiento } from '@/utils/vencimiento'
+import { extraerMensajeError } from '@/utils/apiError'
 import EmptyState from '@/components/EmptyState.vue'
 
 const route = useRoute()
@@ -591,8 +592,8 @@ const save = async () => {
     }
     showForm.value = false
     load()
-  } catch {
-    toast.error('Error al guardar el proyecto. Verifique los datos.')
+  } catch (e) {
+    toast.error(extraerMensajeError(e, 'Error al guardar el proyecto. Verifique los datos.'))
   }
 }
 

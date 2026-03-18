@@ -49,37 +49,63 @@ const mostrar = computed(() => items.value.length >= 3)
 
 <style scoped>
 .breadcrumbs {
-  margin-bottom: 1rem;
+  margin-bottom: clamp(0.875rem, 2vw, 1.125rem);
 }
+
 .breadcrumbs-list {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 0.9rem;
+  font-size: clamp(0.82rem, 2vw, 0.92rem);
+  line-height: 1.4;
 }
+
 .breadcrumb-item {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
 }
+
 .breadcrumb-link {
   color: #64748b;
   text-decoration: none;
   transition: color 0.2s;
+  font-weight: 500;
 }
+
 .breadcrumb-link:hover {
   color: #0d47a1;
 }
+
 .breadcrumb-current {
   color: #1e293b;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
+
 .breadcrumb-sep {
   color: #94a3b8;
-  margin-left: 0.25rem;
+  margin-left: 0.15rem;
+  font-weight: 400;
+  user-select: none;
+}
+
+@media (max-width: 640px) {
+  .breadcrumbs {
+    margin-bottom: 0.75rem;
+  }
+  .breadcrumbs-list {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.25rem;
+    gap: 0.25rem;
+  }
+  .breadcrumb-item {
+    flex-shrink: 0;
+  }
 }
 </style>

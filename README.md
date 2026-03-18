@@ -1,3 +1,3 @@
-# SIPRA
+# SIP-AIF
 
-Sistema de Planificación de Proyectos.
+Sistema Integral de Proyectos.

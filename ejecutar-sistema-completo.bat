@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title SIPRA - Ejecutar sistema completo (PostgreSQL)
+title SIP-AIF - Ejecutar sistema completo (PostgreSQL)
 
 echo ==============================================
-echo   SIPRA - Ejecucion completa con PostgreSQL
+echo   SIP-AIF - Ejecucion completa con PostgreSQL
 echo ==============================================
 echo.
 echo Tip: si quieres validar primero la DB, ejecuta: diagnostico-db.bat
@@ -40,14 +40,14 @@ python manage.py shell -c "from users.models import Usuario; print('Usuarios act
 
 echo [4/5] Iniciando backend en puerto 8001...
 REM DEBUG=1 habilita CORS para desarrollo local
-start "SIPRA Backend (PostgreSQL)" cmd /k "cd /d ""%~dp0backend"" && set ""DEBUG=1"" && set ""DB_PROVIDER=postgres"" && set ""POSTGRES_DB_HOST=localhost"" && set ""POSTGRES_DB_PORT=5432"" && set ""POSTGRES_DB_NAME=sipra"" && set ""POSTGRES_DB_USER=postgres"" && set ""POSTGRES_DB_PASSWORD=30153846"" && python manage.py runserver 8001"
+start "SIP-AIF Backend (PostgreSQL)" cmd /k "cd /d ""%~dp0backend"" && set ""DEBUG=1"" && set ""DB_PROVIDER=postgres"" && set ""POSTGRES_DB_HOST=localhost"" && set ""POSTGRES_DB_PORT=5432"" && set ""POSTGRES_DB_NAME=sipra"" && set ""POSTGRES_DB_USER=postgres"" && set ""POSTGRES_DB_PASSWORD=30153846"" && python manage.py runserver 8001"
 
 echo Esperando 5 segundos para que el backend inicie...
 timeout /t 5 /nobreak >nul
 
 echo [5/5] Iniciando frontend en puerto 5173...
 REM Sin VITE_API_BASE_URL: usa proxy de Vite (/api -> localhost:8001) para evitar CORS
-start "SIPRA Frontend" cmd /k "cd /d ""%~dp0frontend"" && npm run dev"
+start "SIP-AIF Frontend" cmd /k "cd /d ""%~dp0frontend"" && npm run dev"
 
 echo.
 echo ==============================================

@@ -201,7 +201,7 @@ def summarize(metrics: list[RequestMetric]) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Prueba de concurrencia basica para SIPRA")
+    parser = argparse.ArgumentParser(description="Prueba de concurrencia basica para SIP-AIF")
     parser.add_argument("--base-url", default="http://localhost:8001")
     parser.add_argument("--users", type=int, default=18, help="Usuarios virtuales concurrentes")
     parser.add_argument("--iterations", type=int, default=2, help="Vueltas de endpoints por usuario")

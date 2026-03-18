@@ -1,4 +1,4 @@
-# Desplegar SIPRA para demo en la web
+# Desplegar SIP-AIF para demo en la web
 
 Guía rápida para subir el sistema a internet de forma **segura** y **versátil** para mostrar la demo.
 

@@ -160,7 +160,7 @@ function limpiarChat() {
         </div>
 
         <div class="assistente-footer">
-          <span class="assistente-leyenda">Sistema de Seguimiento de Proyectos</span>
+          <span class="assistente-leyenda">SIP-AIF - Sistema Integral de Proyectos</span>
         </div>
       </div>
     </Transition>
@@ -170,8 +170,8 @@ function limpiarChat() {
 <style scoped>
 .assistente-wrap {
   position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
+  bottom: clamp(1.25rem, 3vw, 1.5rem);
+  right: clamp(1.25rem, 3vw, 1.5rem);
   z-index: 999;
 }
 
@@ -183,7 +183,7 @@ function limpiarChat() {
   color: white;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(13, 71, 161, 0.4);
+  box-shadow: 0 4px 16px rgba(13, 71, 161, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -194,22 +194,23 @@ function limpiarChat() {
 
 .assistente-btn:hover {
   transform: scale(1.05);
-  box-shadow: 0 6px 18px rgba(13, 71, 161, 0.5);
+  box-shadow: 0 6px 20px rgba(13, 71, 161, 0.5);
 }
 
 .assistente-btn.abierto {
-  background: #475569;
+  background: linear-gradient(135deg, #475569 0%, #64748b 100%);
 }
 
 .assistente-panel {
   position: absolute;
   bottom: 60px;
   right: 0;
-  width: 380px;
-  max-height: 520px;
+  width: min(380px, calc(100vw - 2.5rem));
+  max-height: min(520px, calc(100vh - 8rem));
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(226, 232, 240, 0.8);
   overflow: hidden;
   display: flex;
   flex-direction: column;

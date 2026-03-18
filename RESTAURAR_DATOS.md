@@ -1,4 +1,4 @@
-# Restauración de datos - SIPRA
+# Restauración de datos - SIP-AIF
 
 ## Pasos para restaurar los datos del sistema
 

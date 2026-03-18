@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onActivated, onDeactivated, onBeforeUnmount, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getProyecto } from '@/services/proyectos'
 import { getTareas } from '@/services/tareas'
 import { api } from '@/services/api'
@@ -11,15 +11,20 @@ import { estadoVencimiento, claseVencimiento } from '@/utils/vencimiento'
 import PieChart from '@/components/PieChart.vue'
 import BarChart from '@/components/BarChart.vue'
 import { exportarProyectoDetalle } from '@/utils/exportProyectoDetalle'
+import { extraerMensajeError } from '@/utils/apiError'
+import LoaderSpinner from '@/components/LoaderSpinner.vue'
 import IconDownload from '@/components/icons/IconDownload.vue'
 import IconEdit from '@/components/icons/IconEdit.vue'
 import IconTrash from '@/components/icons/IconTrash.vue'
 
 const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 const { user, isAdmin, isVisualizador } = useAuth()
 const { confirmDelete } = useConfirmDelete()
 const proyecto = ref<Record<string, unknown> | null>(null)
+const carga = ref(true)
+const errorCarga = ref('')
 const tareas = ref<Record<string, unknown>[]>([])
 const etapas = ref<Record<string, unknown>[]>([])
 const indicadores = ref<Record<string, unknown>[]>([])
@@ -64,19 +69,32 @@ function formatCurrency(value: unknown): string {
 
 const load = async () => {
   const id = proyectoId.value
-  const [proyRes, tareasRes, etapasRes, indRes, adjRes] = await Promise.all([
-    getProyecto(id),
-    // _ts fuerza bypass de caché para reflejar tareas recién creadas.
-    getTareas({ proyecto: id, _ts: Date.now() }),
-    api.get('etapas/', { params: { proyecto: id } }),
-    api.get('indicadores/', { params: { proyecto: id } }),
-    api.get('adjuntos-proyecto/', { params: { proyecto: id } }),
-  ])
-  proyecto.value = proyRes.data as Record<string, unknown>
-  tareas.value = parseListResponse(tareasRes.data)
-  etapas.value = parseListResponse(etapasRes.data)
-  indicadores.value = Array.isArray(indRes.data) ? indRes.data : (indRes.data?.results || [])
-  adjuntos.value = Array.isArray(adjRes.data) ? adjRes.data : (adjRes.data?.results || [])
+  carga.value = true
+  errorCarga.value = ''
+  try {
+    const [proyRes, tareasRes, etapasRes, indRes, adjRes] = await Promise.all([
+      getProyecto(id),
+      getTareas({ proyecto: id, _ts: Date.now() }),
+      api.get('etapas/', { params: { proyecto: id } }),
+      api.get('indicadores/', { params: { proyecto: id } }),
+      api.get('adjuntos-proyecto/', { params: { proyecto: id } }),
+    ])
+    proyecto.value = proyRes.data as Record<string, unknown>
+    tareas.value = parseListResponse(tareasRes.data)
+    etapas.value = parseListResponse(etapasRes.data)
+    indicadores.value = Array.isArray(indRes.data) ? indRes.data : (indRes.data?.results || [])
+    adjuntos.value = Array.isArray(adjRes.data) ? adjRes.data : (adjRes.data?.results || [])
+  } catch (e) {
+    const err = e as { response?: { status?: number } }
+    proyecto.value = null
+    if (err.response?.status === 404) {
+      errorCarga.value = 'Proyecto no encontrado.'
+    } else {
+      errorCarga.value = extraerMensajeError(e, 'No se pudo cargar el proyecto. Verifique la conexión.')
+    }
+  } finally {
+    carga.value = false
+  }
 }
 
 async function subirAdjuntoProyecto() {
@@ -400,7 +418,14 @@ watch(proyectoId, () => {
 </script>
 
 <template>
-  <div class="page" v-if="proyecto">
+  <LoaderSpinner v-if="carga" texto="Cargando proyecto..." />
+  <div v-else-if="errorCarga" class="page state-error-box">
+    <p class="state-error-msg">{{ errorCarga }}</p>
+    <button type="button" class="btn-volver" @click="router.push('/proyectos')">
+      Volver a Proyectos
+    </button>
+  </div>
+  <div v-else-if="proyecto" class="page">
     <div class="header-row">
       <h1>{{ proyecto.nombre }}</h1>
       <div class="header-actions">
@@ -726,6 +751,30 @@ watch(proyectoId, () => {
   margin-bottom: 0.5rem;
 }
 .page h1 { margin: 0; }
+.state-error-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  text-align: center;
+}
+.state-error-msg {
+  color: #b91c1c;
+  font-size: 1rem;
+  margin: 0;
+}
+.btn-volver {
+  padding: 0.6rem 1.2rem;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-volver:hover { background: #1d4ed8; }
 .btn-reasignar {
   padding: 0.5rem 1rem;
   background: #16a34a;

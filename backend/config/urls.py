@@ -7,7 +7,7 @@ from django.conf.urls.static import static
 def api_root(request):
     base = request.build_absolute_uri('/').rstrip('/')
     return JsonResponse({
-        "mensaje": "API Sistema de Seguimiento de Proyectos",
+        "mensaje": "API SIP-AIF - Sistema Integral de Proyectos",
         "api": f"{base}/api/",
         "endpoints": ["/api/proyectos/", "/api/tareas/", "/api/areas/", "/api/usuarios/", "/api/roles/", "/api/dashboard/ejecutivo/"],
     })

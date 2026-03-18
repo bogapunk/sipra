@@ -1,10 +1,10 @@
 #!/bin/bash
-# Script para desplegar SIPRA en un servidor (ej. VPS)
+# Script para desplegar SIP-AIF en un servidor (ej. VPS)
 # Uso: ./deploy-demo.sh
 
 set -e
 
-echo "=== Despliegue SIPRA Demo ==="
+echo "=== Despliegue SIP-AIF Demo ==="
 
 # Verificar Docker
 if ! command -v docker &> /dev/null; then

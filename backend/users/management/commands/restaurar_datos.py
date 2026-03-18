@@ -1,5 +1,5 @@
 """
-Restaura los datos del sistema SIPRA:
+Restaura los datos del sistema SIP-AIF:
 - Reactiva todos los usuarios (por si fueron desactivados con eliminación lógica)
 - Crea datos iniciales (roles, áreas, usuarios, proyectos, tareas) si no existen
 """

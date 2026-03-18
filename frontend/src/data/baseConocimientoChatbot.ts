@@ -34,9 +34,11 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['dashboard', 'inicio', 'principal', 'resumen', 'indicadores', 'métricas', 'tarjetas'],
     respuesta: r(
       'Dashboard',
-      'El Dashboard muestra una vista general del sistema con: tarjetas de métricas (total proyectos, activos, tareas, finalizadas, bloqueadas, avance global), lista de proyectos con avance y barra de progreso, y acceso rápido al detalle y reasignación.',
+      'El Dashboard muestra una vista general del sistema con: tarjetas de métricas (total proyectos, activos, tareas, finalizadas, bloqueadas, avance global), gráficos de proyectos por estado y por dependencia, proyectos en riesgo, tendencia de avance, carga por responsable, lista de proyectos con avance y barra de progreso, y acceso rápido al detalle y reasignación. Los Administradores ven el Dashboard ejecutivo completo; Visualizadores y Carga ven según su rol.',
       [
         'Las tarjetas superiores muestran el estado global del sistema.',
+        'Gráficos: proyectos por estado, por dependencia, tendencia temporal.',
+        'Proyectos en riesgo: atrasados o con tareas bloqueadas.',
         'Cada proyecto muestra su avance calculado desde las tareas.',
         'Haga clic en un proyecto para ver detalle, comentarios y reasignar.',
       ],
@@ -58,7 +60,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['filtrar dashboard', 'filtrar datos dashboard'],
     respuesta: r(
       'Filtros en Dashboard',
-      'El Dashboard muestra todos los proyectos visibles según su rol. Los administradores ven todo. Los visualizadores ven según restricciones. Use el buscador si está disponible para filtrar por nombre.',
+      'El Dashboard muestra todos los proyectos visibles según su rol. Los Administradores ven todo el sistema. Los Visualizadores ven Dashboard, Avances por área, Avances por secretaría, Planificación, Proyectos, Tareas y Calendario (solo lectura). Los Carga ven solo sus proyectos asignados. Use el buscador para filtrar por nombre de proyecto.',
       undefined,
       undefined,
       'Dashboard'
@@ -158,17 +160,43 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     ),
   },
   {
-    keywords: ['crear plan', 'crear programa', 'crear objetivo', 'vincular planificación'],
+    keywords: ['crear plan', 'crear programa', 'crear objetivo', 'crear eje', 'vincular planificación'],
     respuesta: r(
       'Crear elementos de planificación',
-      'Desde la pestaña correspondiente (Planes, Programas, Objetivos), use el botón de crear. Complete los campos obligatorios. Los elementos se vinculan en cascada: Eje → Plan → Programa → Objetivo. Los proyectos se asocian a un objetivo estratégico al crearlos o editarlos.',
+      'Desde la pestaña correspondiente (Ejes, Planes, Programas, Objetivos, Indicadores), use el botón de crear. Complete los campos obligatorios. Jerarquía: Eje → Plan → Programa → Objetivo Estratégico → Proyecto → Indicadores. Cada nivel tiene filtros para buscar en el nivel superior. Los proyectos se asocian a un objetivo estratégico al crearlos o editarlos.',
       [
-        'Respetar la jerarquía: no puede crear un programa sin plan.',
-        'La planificación impacta en la trazabilidad estratégica de los proyectos.',
-        'Los indicadores se asocian a cada proyecto.',
+        'Ejes: nivel superior, sin dependencia.',
+        'Planes: asociados a un Eje.',
+        'Programas: asociados a un Plan.',
+        'Objetivos: asociados a un Programa.',
+        'Indicadores: asociados a Proyectos vinculados a objetivos.',
       ],
       undefined,
       'Planificación'
+    ),
+  },
+  {
+    keywords: ['crear secretaría', 'nueva secretaría', 'editar secretaría'],
+    respuesta: r(
+      'Gestión de Secretarías',
+      'En el módulo Secretarías (solo Administrador) puede crear, editar y desactivar secretarías. Cada secretaría tiene código, nombre y descripción. Las secretarías inactivas no aparecen en selectores. Los proyectos pueden asignarse a una secretaría. Las tareas y usuarios pueden vincularse a secretarías. Use "Ver proyectos" para ver los proyectos de una secretaría.',
+      [
+        'Las secretarías son unidades organizativas alternativas a las Áreas.',
+        'Un proyecto tiene Área o Secretaría, no ambas.',
+        'Los usuarios Carga con secretaría ven solo sus proyectos.',
+      ],
+      undefined,
+      'Secretarías'
+    ),
+  },
+  {
+    keywords: ['desactivar usuario', 'eliminar usuario', 'usuario inactivo'],
+    respuesta: r(
+      'Desactivar usuarios',
+      'El sistema usa eliminación lógica: al "eliminar" un usuario, se desactiva pero no se borra de la base de datos. Los usuarios desactivados no pueden iniciar sesión. El comando restaurar_datos reactiva usuarios previamente desactivados. Para desactivar: edite el usuario y cambie el estado a inactivo (si está disponible) o use la opción de eliminación del módulo.',
+      undefined,
+      undefined,
+      'Usuarios'
     ),
   },
 
@@ -215,7 +243,17 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['estado proyecto', 'activo', 'finalizado', 'en pausa', 'en curso'],
     respuesta: r(
       'Estados de proyecto',
-      'Activo: en ejecución. En pausa: temporalmente detenido. Finalizado: completado (se marca automáticamente cuando todas las tareas llegan al 100%). Puede actualizar el estado manualmente al editar el proyecto.',
+      'Activo: en ejecución. En pausa: temporalmente detenido. Finalizado: completado (se marca automáticamente cuando todas las tareas llegan al 100%). Puede actualizar el estado manualmente al editar el proyecto. En Tareas también puede filtrar por estado: Activa, Finalizada, Bloqueada.',
+      undefined,
+      undefined,
+      'Proyectos'
+    ),
+  },
+  {
+    keywords: ['dependencia organizacional', 'área o secretaría', 'tipo dependencia'],
+    respuesta: r(
+      'Dependencia organizacional',
+      'Proyectos y tareas tienen una dependencia organizacional: Área o Secretaría. Solo puede elegir una de las dos. Si elige Área, selecciona una o más áreas. Si elige Secretaría, selecciona una secretaría. Esto define la estructura y quién puede ver/cargar: los usuarios Carga con área ven proyectos de su área; con secretaría ven proyectos de su secretaría.',
       undefined,
       undefined,
       'Proyectos'
@@ -269,6 +307,48 @@ export const entradasConocimiento: EntradaConocimiento[] = [
       undefined,
       undefined,
       'Tareas'
+    ),
+  },
+  {
+    keywords: ['prioridad tarea', 'prioridad alta', 'prioridad media', 'prioridad baja'],
+    respuesta: r(
+      'Prioridad de tareas',
+      'Cada tarea tiene una prioridad: Alta, Media o Baja. Se asigna al crear o editar la tarea. La prioridad ayuda a ordenar y priorizar el trabajo. En Tareas puede filtrar por estado (Activa, Finalizada, Bloqueada) y ver la prioridad en la tabla. Las tareas de alta prioridad suelen mostrarse con color rojo, media con amarillo y baja con verde.',
+      [
+        'Seleccione la prioridad en el formulario de tarea.',
+        'Use el filtro por estado para ver solo tareas activas o bloqueadas.',
+        'La prioridad no afecta el cálculo de avance del proyecto.',
+      ],
+      undefined,
+      'Tareas'
+    ),
+  },
+  {
+    keywords: ['tarea padre', 'subtarea', 'tarea hija', 'jerarquía tareas'],
+    respuesta: r(
+      'Tareas padre e hijas',
+      'Las tareas pueden tener una tarea padre, formando una jerarquía. Una tarea sin padre es de nivel superior. Las subtareas se vinculan seleccionando "Tarea padre" al crearlas o editarlas. El avance del proyecto se calcula considerando todas las tareas (padre e hijas).',
+      [
+        'Cree primero la tarea padre, luego las hijas.',
+        'Las subtareas pueden tener su propio responsable y fechas.',
+        'Útil para desglosar trabajo en fases o sub-actividades.',
+      ],
+      undefined,
+      'Tareas'
+    ),
+  },
+  {
+    keywords: ['paginación', 'páginas', 'paginado', 'siguiente página'],
+    respuesta: r(
+      'Paginación',
+      'Los módulos Proyectos y Tareas usan paginación para mostrar los resultados. Puede navegar entre páginas con los botones "Anterior" y "Siguiente", o ir a una página específica. El tamaño de página es configurable. Los filtros y búsqueda se aplican al conjunto total antes de paginar.',
+      [
+        'Proyectos: paginación por defecto.',
+        'Tareas: filtros por estado y búsqueda por título.',
+        'Exportar Excel respeta los filtros aplicados.',
+      ],
+      undefined,
+      undefined
     ),
   },
 
@@ -337,7 +417,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['permisos usuario', 'qué puede hacer'],
     respuesta: r(
       'Permisos por rol',
-      'Administrador: ABM completo en todos los módulos. Visualizador: solo lectura en Dashboard, Avances por área, Planificación, Proyectos, Tareas; no ve Áreas, Secretarías, Usuarios, Roles ni Cargar Avances. Carga: solo Cargar Avances y Dashboard (sus proyectos); no ve el resto.',
+      'Administrador: ABM completo en todos los módulos (Dashboard, Avances, Planificación, Proyectos, Tareas, Calendario, Áreas, Secretarías, Usuarios, Roles, Backup, Auditoría). Visualizador: solo lectura en Dashboard, Avances por área/secretaría, Planificación, Proyectos, Tareas, Calendario; no ve Áreas, Secretarías, Usuarios, Roles, Cargar Avances, Backup ni Auditoría. Carga: solo Cargar Avances, Dashboard y Calendario (sus proyectos); no ve Proyectos, Tareas, Planificación ni configuración.',
       undefined,
       undefined,
       'Usuarios'
@@ -369,7 +449,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['visualizador', 'rol visualizador', 'qué puede visualizador'],
     respuesta: r(
       'Rol Visualizador',
-      'Solo lectura. Ve: Dashboard, Avances por área, Planificación, Proyectos, Tareas. No ve: Secretarías, Áreas, Usuarios, Roles, Cargar Avances, Avances por secretaría. No puede crear, editar ni eliminar. Ideal para consulta y reportes.',
+      'Solo lectura. Ve: Dashboard, Avances por área, Avances por secretaría, Planificación, Proyectos, Tareas y Calendario. No ve: Áreas, Secretarías, Usuarios, Roles, Cargar Avances, Backup & Restore, Auditoría. No puede crear, editar ni eliminar. Puede exportar a Excel en los módulos permitidos. Ideal para consulta y reportes.',
       undefined,
       undefined,
       'Roles'
@@ -410,9 +490,13 @@ export const entradasConocimiento: EntradaConocimiento[] = [
   {
     keywords: ['descargar excel', 'exportar', 'excel'],
     respuesta: r(
-      'Descargar Excel',
-      'Exporta la lista visible (o filtrada) a un archivo CSV/Excel. Incluye las columnas principales del módulo. Útil para reportes externos o análisis en hoja de cálculo.',
-      undefined,
+      'Descargar Excel y exportar',
+      'Varios módulos permiten exportar datos: Proyectos (lista con filtros), Tareas (lista con filtros), Proyecto detalle (detalle completo con etapas, tareas e indicadores), Avances por área (reporte por área con búsqueda aplicada), Avances por secretaría (reporte por secretaría). El botón "Descargar Excel" o "Exportar" genera archivos CSV/Excel. Los Visualizadores pueden exportar en los módulos que tienen acceso.',
+      [
+        'Proyectos: exporta la lista filtrada o paginada.',
+        'Proyecto detalle: exporta a Excel con toda la información del proyecto.',
+        'Avances: exporta el reporte con el filtro de búsqueda aplicado.',
+      ],
       undefined,
       undefined
     ),
@@ -421,7 +505,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['buscar', 'buscador', 'filtrar'],
     respuesta: r(
       'Buscadores y filtros',
-      'La mayoría de módulos tienen buscador por nombre o filtros por estado. Escriba en el campo de búsqueda para filtrar en tiempo real. En Cargar Avances hay buscador por proyecto.',
+      'La mayoría de módulos tienen buscador o filtros: Proyectos (por nombre, área, secretaría), Tareas (por título, estado Activa/Finalizada/Bloqueada), Avances por área (por tarea o proyecto), Avances por secretaría (por secretaría), Planificación (filtros por eje, plan, programa), Backup (por fecha y texto), Auditoría (por proyecto, tarea, usuario, tipo, fechas). En Cargar Avances hay buscador por proyecto. Los filtros se aplican antes de paginar y exportar.',
       undefined,
       undefined,
       undefined
@@ -432,8 +516,52 @@ export const entradasConocimiento: EntradaConocimiento[] = [
   {
     keywords: ['ayuda', 'cómo funciona', 'qué es esto', 'no entiendo'],
     respuesta: r(
-      'Asistente del sistema SIPRA',
-      'Soy el asistente de SIPRA. Puede preguntarme sobre: módulos (Dashboard, Proyectos, Tareas, Áreas, Secretarías, Usuarios, Roles), procesos (crear, reasignar, cargar avances), tecnología (arquitectura, credenciales, ejecutar sistema), backup/restore, comentarios, adjuntos, auditoría, indicadores, equipo, tareas particulares, alertas de vencimiento, producción. Escriba en lenguaje natural, ej: "¿Cómo ejecutar el sistema?" o "¿Qué son las tareas particulares?"',
+      'Asistente del sistema SIP-AIF',
+      'Soy el asistente de SIP-AIF. Puede preguntarme sobre: módulos (Dashboard, Avances por área/secretaría, Planificación, Proyectos, Tareas, Calendario, Áreas, Secretarías, Usuarios, Roles, Backup, Auditoría), procesos (crear, reasignar, cargar avances, exportar), prioridad de tareas, tareas padre/hijas, paginación, equipo, etapas, indicadores, comentarios, adjuntos, auditoría, credenciales, ejecutar sistema, producción y más. Escriba en lenguaje natural, ej: "¿Cómo exportar un proyecto?" o "¿Qué es la prioridad de una tarea?"',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['menú', 'navegación', 'sidebar', 'menú lateral'],
+    respuesta: r(
+      'Menú de navegación',
+      'El menú lateral aparece a la izquierda (desktop) o como menú hamburguesa en móvil. Muestra: Dashboard, Avances por área, Avances por secretaría, Planificación, Proyectos, Tareas, Calendario, Áreas, Secretarías, Usuarios, Roles, Backup & Restore, Auditoría. Los ítems visibles dependen del rol. Administrador ve todo; Visualizador no ve Áreas, Secretarías, Usuarios, Roles, Cargar Avances, Backup ni Auditoría; Carga solo ve Dashboard, Cargar Avances y Calendario.',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['asistente', 'chatbot', 'botón ayuda', 'dónde está el asistente'],
+    respuesta: r(
+      'Asistente del sistema',
+      'El asistente es el botón con "?" en la esquina inferior derecha de la pantalla. Al hacer clic se abre un panel con sugerencias contextuales según la ruta actual y un campo para escribir preguntas. Escriba en lenguaje natural y obtendrá respuestas sobre el módulo, procesos o permisos. Use "Limpiar conversación" para reiniciar. El panel se adapta a móviles.',
+      [
+        'Botón visible en todas las pantallas (excepto login).',
+        'Sugerencias cambian según la página actual.',
+        'Puede preguntar sobre cualquier funcionalidad.',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['breadcrumbs', 'migas de pan', 'navegación ruta'],
+    respuesta: r(
+      'Breadcrumbs (migas de pan)',
+      'Cuando navega en rutas anidadas (ej: Proyecto X → Reasignar), aparece una barra de breadcrumbs arriba del contenido: "Inicio › Proyectos › Nombre Proyecto › Reasignar". Cada ítem es clicable para volver atrás. Solo se muestra cuando hay al menos 3 niveles.',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['responsive', 'móvil', 'tablet', 'celular'],
+    respuesta: r(
+      'Sistema responsive',
+      'SIP-AIF es completamente responsive. En móvil: el menú lateral se convierte en menú hamburguesa (botón superior izquierdo), las tablas tienen scroll horizontal, los formularios se apilan, los botones de acción se adaptan. En tablet y desktop: layout completo. Los touch targets mínimos son 44px para usabilidad táctil. Soporta safe-area para dispositivos con notch.',
       undefined,
       undefined,
       undefined
@@ -473,10 +601,20 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['secretaría', 'secretarias'],
     respuesta: r(
       'Secretarías',
-      'Las secretarías son unidades organizativas. Se gestionan en el módulo Secretarías. Los proyectos pueden asignarse a una secretaría. Las tareas pueden tener área o secretaría. Los usuarios Carga con secretaría asignada solo ven proyectos/tareas de su secretaría. En Avances por Secretaría se agrupan las tareas por secretaría.',
+      'Las secretarías son unidades organizativas alternativas a las Áreas. Se gestionan en el módulo Secretarías (solo Administrador). Los proyectos pueden asignarse a una secretaría (o a áreas, pero no ambas). Las tareas pueden tener área o secretaría. Los usuarios Carga con secretaría asignada solo ven proyectos/tareas de su secretaría. En Avances por Secretaría se agrupan las tareas por secretaría. Puede exportar el reporte con el botón "Exportar reporte".',
       undefined,
       undefined,
       'Secretarías'
+    ),
+  },
+  {
+    keywords: ['diferencia área secretaría', 'área vs secretaría', 'cuándo usar área'],
+    respuesta: r(
+      'Área vs Secretaría',
+      'Ambas son unidades organizativas. Un proyecto o tarea tiene una u otra, no ambas. Use Área cuando la estructura se organice por áreas funcionales. Use Secretaría cuando se organice por secretarías. Los usuarios Carga se asignan a un Área o una Secretaría; ven solo los proyectos/tareas de su asignación. En Avances por Área las tareas se agrupan por área; en Avances por Secretaría por secretaría.',
+      undefined,
+      undefined,
+      undefined
     ),
   },
 
@@ -484,8 +622,8 @@ export const entradasConocimiento: EntradaConocimiento[] = [
   {
     keywords: ['tecnología', 'stack', 'arquitectura', 'cómo está hecho', 'backend', 'frontend', 'django', 'vue'],
     respuesta: r(
-      'Arquitectura del sistema SIPRA',
-      'SIPRA es un sistema full-stack: Backend en Django REST Framework (Python) con PostgreSQL. Frontend en Vue 3 + Vite + TypeScript. Autenticación JWT. API REST en /api/. El frontend usa proxy hacia el backend en desarrollo. Puerto backend: 8001, frontend: 5173.',
+      'Arquitectura del sistema SIP-AIF',
+      'SIP-AIF es un sistema full-stack: Backend en Django REST Framework (Python) con PostgreSQL. Frontend en Vue 3 + Vite + TypeScript. Autenticación JWT. API REST en /api/. El frontend usa proxy hacia el backend en desarrollo. Puerto backend: 8001, frontend: 5173.',
       [
         'Backend: Django 4.x, DRF, PostgreSQL, JWT.',
         'Frontend: Vue 3, Vue Router, Axios, Vite.',
@@ -539,11 +677,11 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['backup', 'respaldo', 'guardar copia', 'exportar datos'],
     respuesta: r(
       'Backup del sistema',
-      'En el módulo Backup y Restore (solo Administrador) puede crear backups de la base de datos PostgreSQL y del código. Los backups se guardan en la carpeta configurada. Hay backup de datos (pg_dump) y backup de código. Use "Crear backup" para generar una copia en el momento actual.',
+      'En el módulo Backup y Restore (solo Administrador) puede crear backups de la base de datos PostgreSQL y del código. Hay dos tipos: backup de datos (pg_dump, archivo .sql) y backup de código (copia de archivos del proyecto). Los backups se listan con fecha y puede filtrar por rango de fechas o texto. Use "Crear backup" para generar una copia. Los backups permiten restaurar en caso de fallo.',
       [
         'Backup de datos: exporta la base PostgreSQL completa.',
         'Backup de código: copia los archivos del proyecto.',
-        'Los backups permiten restaurar en caso de fallo.',
+        'Puede filtrar la lista por fecha y descargar backups previos.',
       ],
       undefined,
       'Backup y Restore'
@@ -671,10 +809,34 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['dashboard ejecutivo', 'vista ejecutivo', 'métricas admin'],
     respuesta: r(
       'Dashboard ejecutivo',
-      'Solo el Administrador ve el Dashboard ejecutivo. Muestra: total proyectos, proyectos activos, total tareas, tareas finalizadas, bloqueadas, tareas particulares, avance global y avance de tareas particulares. Es una vista consolidada para la dirección.',
+      'Solo el Administrador ve el Dashboard ejecutivo completo. Muestra: total proyectos, proyectos activos, total tareas, tareas finalizadas, bloqueadas, tareas particulares, avance global, avance de tareas particulares, gráficos (proyectos por estado, por dependencia, tendencia de avance, vencimientos), proyectos en riesgo y tareas críticas. Los Visualizadores ven un Dashboard de solo lectura. Los Carga ven solo sus proyectos asignados.',
       undefined,
       undefined,
       'Dashboard'
+    ),
+  },
+  {
+    keywords: ['proyectos en riesgo', 'proyectos atrasados', 'riesgo'],
+    respuesta: r(
+      'Proyectos en riesgo',
+      'El Dashboard muestra proyectos en riesgo: aquellos atrasados (fecha fin estimada vencida) o con tareas bloqueadas. Incluye: nombre, estado, responsable, secretaría, fecha fin, avance, tareas bloqueadas y días de atraso. Solo el Administrador ve esta sección completa. Útil para priorizar seguimiento.',
+      [
+        'Proyectos atrasados: fecha_fin_estimada ya pasada.',
+        'Tareas bloqueadas: requieren atención.',
+        'Clic en "Ver todos" para ir al listado filtrado.',
+      ],
+      undefined,
+      'Dashboard'
+    ),
+  },
+  {
+    keywords: ['estado tarea', 'tarea activa', 'tarea bloqueada', 'tarea finalizada'],
+    respuesta: r(
+      'Estados de tarea',
+      'Las tareas tienen estados: Activa (en curso), Finalizada (100% de avance, se marca automáticamente), Bloqueada (requiere atención). En el módulo Tareas puede filtrar por estado con los botones/pills. Las tareas bloqueadas se cuentan en el Dashboard. Al cargar 100% la tarea pasa a Finalizada.',
+      undefined,
+      undefined,
+      'Tareas'
     ),
   },
   {
@@ -695,8 +857,12 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['calendario', 'fechas', 'ver fechas'],
     respuesta: r(
       'Calendario',
-      'El módulo Calendario muestra las tareas y proyectos en vista de calendario según sus fechas de inicio y vencimiento. Permite visualizar la carga de trabajo en el tiempo y detectar concentraciones o vencimientos próximos.',
-      undefined,
+      'El módulo Calendario muestra las tareas y proyectos en vista mensual. Puede alternar entre vista de tareas y vista de proyectos. Cada celda muestra los eventos del día. Al hacer clic en un día se abre un modal con el detalle de tareas o proyectos. Las fechas se toman de inicio y vencimiento. Permite visualizar la carga de trabajo y detectar vencimientos próximos. Todos los roles con acceso (Admin, Visualizador, Carga) ven el calendario según sus permisos.',
+      [
+        'Vista tareas: muestra tareas por fecha de vencimiento.',
+        'Vista proyectos: muestra proyectos por fechas.',
+        'Clic en el día: abre modal con detalle.',
+      ],
       undefined,
       'Calendario'
     ),
@@ -749,6 +915,30 @@ export const entradasConocimiento: EntradaConocimiento[] = [
       undefined
     ),
   },
+  {
+    keywords: ['docker', 'contenedor', 'docker compose'],
+    respuesta: r(
+      'Ejecutar con Docker',
+      'Para producción con Docker: use docker compose up -d --build desde la raíz. Consulte DOCKER.md para la guía completa. El docker-compose.yml define PostgreSQL, backend y frontend. Variables de entorno: POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, DATABASE_URL, etc. Para desarrollo local use ejecutar-sistema-completo.bat.',
+      [
+        'Docker requiere Docker y Docker Compose instalados.',
+        'docker-compose.produccion.yml para entorno de producción.',
+        'Los backups pueden guardarse en volumen montado.',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['scroll', 'volver arriba', 'botón inicio'],
+    respuesta: r(
+      'Botón volver al inicio',
+      'Cuando hace scroll hacia abajo, aparece un botón flotante en la esquina inferior derecha (arriba del asistente) para volver al inicio de la página. Al hacer clic, hace scroll suave hacia arriba. Útil en páginas largas como Dashboard o listados.',
+      undefined,
+      undefined,
+      undefined
+    ),
+  },
 
   // ========== ERRORES Y SOLUCIÓN ==========
   {
@@ -766,10 +956,10 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     ),
   },
   {
-    keywords: ['sipra', 'qué es sipra', 'sistema planificación'],
+    keywords: ['sip-aif', 'qué es sip-aif', 'sistema integral proyectos', 'sistema planificación'],
     respuesta: r(
-      'SIPRA',
-      'SIPRA es el Sistema Integrado de Planificación de Proyectos por Área. Permite gestionar proyectos, tareas, avances, áreas, secretarías, usuarios y roles. Incluye planificación estratégica (ejes, planes, programas, objetivos), dashboards, alertas de vencimiento, backup/restore y auditoría. Desarrollado para la Agencia de Innovación.',
+      'SIP-AIF',
+      'SIP-AIF es el Sistema Integral de Proyectos. Permite gestionar proyectos, tareas, avances, áreas, secretarías, usuarios y roles. Incluye planificación estratégica (ejes, planes, programas, objetivos), dashboards, alertas de vencimiento, backup/restore y auditoría. Desarrollado para la Agencia de Innovación.',
       undefined,
       undefined,
       undefined
@@ -782,36 +972,45 @@ export function obtenerSugerenciasPorRuta(ruta: string): string[] {
   const sugerencias: Record<string, string[]> = {
     '/dashboard': [
       '¿Qué información muestra el Dashboard?',
+      '¿Qué son los proyectos en riesgo?',
       '¿Cómo se interpretan los indicadores?',
       '¿Qué es el Dashboard ejecutivo?',
     ],
     '/avances-por-area': [
-      '¿Cómo se visualizan los proyectos por área?',
+      '¿Cómo se visualizan los avances por área?',
       '¿Qué pasa cuando un proyecto llega al 100%?',
+      '¿Cómo exportar el reporte de avances?',
       '¿Cómo se interpreta el historial de avances?',
     ],
     '/avances-por-secretaria': [
-      '¿Cómo se agrupan los proyectos por secretaría?',
+      '¿Cómo se agrupan las tareas por secretaría?',
+      '¿Cómo exportar el reporte?',
       '¿Cómo funcionan los filtros?',
     ],
     '/planificacion': [
-      '¿Cómo se crean Planes y Programas?',
+      '¿Cómo se crean Ejes, Planes y Programas?',
       '¿Cómo se vinculan los objetivos a proyectos?',
       '¿Qué son los indicadores de proyecto?',
     ],
     '/proyectos': [
       '¿Cómo crear un proyecto?',
       '¿Cómo reasignar un proyecto?',
-      '¿Cómo asignar equipo a un proyecto?',
+      '¿Cómo exportar a Excel?',
+      '¿Qué es la dependencia organizacional?',
     ],
     '/tareas': [
       '¿Cómo crear una tarea?',
+      '¿Qué es la prioridad de una tarea?',
       '¿Cómo se actualiza el avance?',
       '¿Qué son las tareas particulares?',
     ],
     '/areas': [
       '¿Cómo crear o editar un área?',
       '¿Cómo impactan las áreas en el sistema?',
+    ],
+    '/secretarias': [
+      '¿Cómo crear una secretaría?',
+      '¿Cuál es la diferencia entre Área y Secretaría?',
     ],
     '/usuarios': [
       '¿Cómo crear un usuario?',
@@ -825,25 +1024,29 @@ export function obtenerSugerenciasPorRuta(ruta: string): string[] {
     '/cargar': [
       '¿Cómo actualizar el avance de una tarea?',
       '¿Qué pasa al cargar 100%?',
+      '¿Dónde veo solo mis tareas?',
     ],
-    '/backup': [
+    '/backup-restore': [
       '¿Cómo hacer backup del sistema?',
       '¿Cómo restaurar los datos?',
+      '¿Qué tipos de backup hay?',
     ],
     '/calendario': [
       '¿Qué muestra el calendario?',
+      '¿Cómo ver tareas y proyectos por fecha?',
       '¿Cómo ver las alertas de vencimiento?',
     ],
-    '/auditoria': [
+    '/auditoria-comentarios': [
       '¿Qué registra la auditoría?',
       '¿Quién puede ver el log de auditoría?',
+      '¿Cómo filtrar por proyecto o tarea?',
     ],
   }
   for (const [path, preguntas] of Object.entries(sugerencias)) {
     if (ruta.startsWith(path)) return preguntas
   }
   return [
-    '¿Qué es SIPRA?',
+    '¿Qué es SIP-AIF?',
     '¿Cómo ejecutar el sistema?',
     '¿Cuáles son las credenciales de acceso?',
     '¿Cómo crear un proyecto?',

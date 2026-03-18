@@ -1,6 +1,6 @@
 # Migración de SQLite a PostgreSQL
 
-Esta guía describe cómo migrar SIPRA de SQLite a PostgreSQL y qué cambios afectan al sistema.
+Esta guía describe cómo migrar SIP-AIF de SQLite a PostgreSQL y qué cambios afectan al sistema.
 
 ---
 

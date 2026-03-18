@@ -1,6 +1,6 @@
-# Despliegue con Docker - SIPRA
+# Despliegue con Docker - SIP-AIF
 
-Guía para ejecutar el Sistema de Seguimiento de Proyectos en producción con Docker.
+Guía para ejecutar SIP-AIF (Sistema Integral de Proyectos) en producción con Docker.
 
 ## Requisitos
 
