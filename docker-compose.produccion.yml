@@ -1,7 +1,8 @@
 # Producción: PostgreSQL en contenedor "postgres" (-p 5433:5432), app en 8085
 # Usar con: docker-compose -f docker-compose.produccion.yml up -d
 #
-# BD: PostgreSQL en puerto 5433 del host. 172.17.0.1 = gateway Docker (host).
+# IMPORTANTE: Conectar postgres a la red sipra antes de levantar:
+#   docker network connect sipra_default postgres
 
 services:
   backend:
@@ -10,9 +11,9 @@ services:
       dockerfile: Dockerfile
     environment:
       DB_PROVIDER: postgres
-      DATABASE_URL: "postgresql://admin:qlwpuc%23EEVfs6zY4@172.17.0.1:5433/sipra"
-      POSTGRES_DB_HOST: 172.17.0.1
-      POSTGRES_DB_PORT: 5433
+      DATABASE_URL: "postgresql://admin:qlwpuc%23EEVfs6zY4@postgres:5432/sipra"
+      POSTGRES_DB_HOST: postgres
+      POSTGRES_DB_PORT: 5432
       POSTGRES_DB_NAME: sipra
       POSTGRES_DB_USER: admin
       POSTGRES_DB_PASSWORD: "qlwpuc#EEVfs6zY4"
