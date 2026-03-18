@@ -10,12 +10,12 @@ services:
   backend:
     depends_on: []
     environment:
-      DATABASE_URL: postgresql://admin:qlwpuc%23EEVfs6zY4@10.1.9.194:5432/sipra
+      DATABASE_URL:  "postgresql://admin:qlwpuc%23EEVfs6zY4@10.1.9.194:5432/sipra"
       POSTGRES_DB_HOST: 10.1.9.194
       POSTGRES_DB_PORT: 5432
       POSTGRES_DB_NAME: sipra
       POSTGRES_DB_USER: admin
-      POSTGRES_DB_PASSWORD: qlwpuc#EEVfs6zY4
+      POSTGRES_DB_PASSWORD: "qlwpuc#EEVfs6zY4"
       DEBUG: "0"
       SECRET_KEY: ${SECRET_KEY:-sipra-produccion-clave-segura-cambiar}
       ALLOWED_HOSTS: 10.1.9.194,localhost,127.0.0.1
