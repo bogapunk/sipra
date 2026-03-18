@@ -26,6 +26,8 @@ services:
       POSTGRES_DB_USER: ${POSTGRES_DB_USER:-sipra}
       POSTGRES_DB_PASSWORD: ${POSTGRES_DB_PASSWORD:-sipra_secret}
       POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-600}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-3}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-2}
       DEBUG: ${DEBUG:-0}
       SECRET_KEY: ${SECRET_KEY:-cambiar-en-produccion-clave-secreta-larga}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}

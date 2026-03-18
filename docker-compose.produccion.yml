@@ -1,0 +1,28 @@
+# Override para producción: PostgreSQL externo en 10.1.9.194, puerto 8081
+# Usar con: docker-compose -f docker-compose.yml -f docker-compose.produccion.yml up -d
+
+services:
+  db:
+    profiles: ["local"]
+  backup:
+    profiles: ["local"]
+
+  backend:
+    depends_on: []
+    environment:
+      DATABASE_URL: postgresql://admin:qlwpuc%23EEVfs6zY4@10.1.9.194:5432/sipra
+      POSTGRES_DB_HOST: 10.1.9.194
+      POSTGRES_DB_PORT: 5432
+      POSTGRES_DB_NAME: sipra
+      POSTGRES_DB_USER: admin
+      POSTGRES_DB_PASSWORD: qlwpuc#EEVfs6zY4
+      DEBUG: "0"
+      SECRET_KEY: ${SECRET_KEY:-sipra-produccion-clave-segura-cambiar}
+      ALLOWED_HOSTS: 10.1.9.194,localhost,127.0.0.1
+      CORS_ALLOW_ALL_ORIGINS: "0"
+      CORS_ALLOWED_ORIGINS: http://10.1.9.194:8081
+      CSRF_TRUSTED_ORIGINS: http://10.1.9.194:8081
+
+  frontend:
+    ports:
+      - "8081:80"
