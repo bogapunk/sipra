@@ -12,7 +12,7 @@ services:
     profiles: ["local"]
 
   backend:
-    # sin depends_on
+    depends_on: []  # PostgreSQL externo, no depende del contenedor db
     environment:
       DATABASE_URL:  "postgresql://admin:qlwpuc%23EEVfs6zY4@10.1.9.194:5432/sipra"
       POSTGRES_DB_HOST: 10.1.9.194
