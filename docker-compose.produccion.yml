@@ -1,20 +1,18 @@
-# Override para producción: PostgreSQL externo en 10.1.9.194, puerto 8081
-# Usar con: docker-compose -f docker-compose.yml -f docker-compose.produccion.yml up -d
+# Producción: PostgreSQL externo en 10.1.9.194, puerto 8081
+# Archivo standalone (no extiende el base) para evitar dependencia de db.
+# Usar con: docker-compose -f docker-compose.produccion.yml up -d
 #
-# Frontend con volumen: vincula el directorio ./frontend para actualizar sin rebuild.
-# Flujo tras git pull: docker compose -f docker-compose.yml -f docker-compose.produccion.yml up -d --force-recreate frontend
-# El contenedor reconstruye el frontend al iniciar (npm ci, npm run build) y sirve la nueva versión.
+# Frontend con volumen: vincula ./frontend para actualizar sin rebuild.
+# Tras git pull: docker-compose -f docker-compose.produccion.yml up -d --force-recreate frontend
 
 services:
-  db:
-    profiles: ["local"]
-  backup:
-    profiles: ["local"]
-
   backend:
-    depends_on: []  # PostgreSQL externo, no depende del contenedor db
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     environment:
-      DATABASE_URL:  "postgresql://admin:qlwpuc%23EEVfs6zY4@10.1.9.194:5432/sipra"
+      DB_PROVIDER: postgres
+      DATABASE_URL: "postgresql://admin:qlwpuc%23EEVfs6zY4@10.1.9.194:5432/sipra"
       POSTGRES_DB_HOST: 10.1.9.194
       POSTGRES_DB_PORT: 5432
       POSTGRES_DB_NAME: sipra
@@ -26,13 +24,16 @@ services:
       CORS_ALLOW_ALL_ORIGINS: "0"
       CORS_ALLOWED_ORIGINS: http://10.1.9.194:8081
       CSRF_TRUSTED_ORIGINS: http://10.1.9.194:8081
+    restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile.produccion
     volumes:
-      # Vincula el directorio frontend para actualizar con git pull sin rebuild de imagen
       - ./frontend:/app
     ports:
       - "8081:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

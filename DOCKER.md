@@ -91,26 +91,26 @@ docker compose down -v
 
 ## Producción con PostgreSQL externo
 
-Usa `docker-compose.produccion.yml` para conectar a una base PostgreSQL externa:
+Usa `docker-compose.produccion.yml` (archivo standalone, sin db local):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.produccion.yml up -d --build
+docker-compose -f docker-compose.produccion.yml up -d --build
 ```
 
 El frontend se expone en el puerto **8081**.
 
 ### Actualizar frontend sin rebuild (volumen vinculado)
 
-El `docker-compose.produccion.yml` monta el directorio `./frontend` como volumen. Así puedes actualizar el sistema tras un `git pull` **sin reconstruir la imagen Docker**:
+El `docker-compose.produccion.yml` monta el directorio `./frontend` como volumen. Tras un `git pull` **no hace falta reconstruir la imagen**:
 
-1. En el servidor, actualiza el código:
+1. Actualiza el código:
    ```bash
    git pull
    ```
 
-2. Reinicia solo el contenedor frontend (reconstruye el frontend al iniciar):
+2. Reinicia el frontend (reconstruye al iniciar):
    ```bash
-   docker compose -f docker-compose.yml -f docker-compose.produccion.yml up -d --force-recreate frontend
+   docker-compose -f docker-compose.produccion.yml up -d --force-recreate frontend
    ```
 
-El contenedor ejecutará `npm ci` y `npm run build` al arrancar y servirá la nueva versión. No hace falta `docker build` ni reconstruir la imagen.
+El contenedor ejecutará `npm ci` y `npm run build` al arrancar y servirá la nueva versión.

@@ -50,10 +50,10 @@ if errorlevel 1 (
 )
 
 echo [2/4] Construyendo imágenes (si es necesario)...
-docker-compose -f docker-compose.yml -f docker-compose.produccion.yml build
+docker-compose -f docker-compose.produccion.yml build
 
 echo [3/4] Iniciando servicios de producción...
-docker-compose -f docker-compose.yml -f docker-compose.produccion.yml up -d
+docker-compose -f docker-compose.produccion.yml up -d
 
 if errorlevel 1 (
   echo.
@@ -78,7 +78,7 @@ echo Base de datos: %POSTGRES_DB_NAME% en %POSTGRES_DB_HOST%:%POSTGRES_DB_PORT%
 echo Usuario BD:    %POSTGRES_DB_USER%
 echo.
 echo Comandos útiles:
-echo   Ver logs:     docker-compose -f docker-compose.yml -f docker-compose.produccion.yml logs -f
-echo   Detener:      docker-compose -f docker-compose.yml -f docker-compose.produccion.yml down
+echo   Ver logs:     docker-compose -f docker-compose.produccion.yml logs -f
+echo   Detener:      docker-compose -f docker-compose.produccion.yml down
 echo.
 pause
