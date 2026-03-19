@@ -6,6 +6,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    volumes:
+      - sipra_backups:/app/backups
     environment:
       DB_TYPE: mssql
       DB_HOST: 10.1.9.113
@@ -33,3 +35,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  sipra_backups:

@@ -1,10 +1,11 @@
 """Servicios de backup y restore para SQL Server, SQLite y scripts externos."""
 import os
+import re
 import shutil
 import subprocess
 import zipfile
 from pathlib import Path
-from datetime import datetime
+from datetime import date, datetime
 
 from django.conf import settings
 from django.db import connection
@@ -37,6 +38,14 @@ def ensure_backup_dir():
     return backup_dir
 
 
+def get_mssql_backup_dir():
+    """Directorio para backups SQL: backups/sql/YYYY-MM-DD/"""
+    base = Path(getattr(settings, 'BACKUP_SQL_DIR', Path(settings.BACKUP_DIR) / 'sql'))
+    subdir = base / datetime.now().strftime('%Y-%m-%d')
+    subdir.mkdir(parents=True, exist_ok=True)
+    return subdir
+
+
 def run_external_backup_script():
     """Ejecuta el script externo de backup si está configurado."""
     script_path = getattr(settings, 'BACKUP_SCRIPT_PATH', '') or ''
@@ -59,22 +68,101 @@ def run_external_backup_script():
         return None, str(e)
 
 
-def _create_mssql_backup():
-    """Crea backup de SQL Server usando Django dumpdata (JSON)."""
-    from django.core.management import call_command
+def _escape_sql_value(val) -> str:
+    """Escapa un valor para INSERT en T-SQL."""
+    if val is None:
+        return 'NULL'
+    if isinstance(val, bool):
+        return '1' if val else '0'
+    if isinstance(val, (int, float)):
+        return str(val)
+    if isinstance(val, datetime):
+        return f"'{val.strftime('%Y-%m-%d %H:%M:%S')}'"
+    if isinstance(val, date):
+        return f"'{val.strftime('%Y-%m-%d')}'"
+    s = str(val).replace("'", "''")
+    return f"'{s}'"
 
-    backup_dir = ensure_backup_dir()
+
+def _create_mssql_backup():
+    """Crea backup de SQL Server en formato .sql (backups/sql/YYYY-MM-DD/)."""
+    backup_dir = get_mssql_backup_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_name = f"backup_{timestamp}.json"
+    backup_name = f"sipra_{timestamp}.sql"
     backup_path = backup_dir / backup_name
 
+    lines = [
+        '-- SIPRA Backup - Microsoft SQL Server',
+        f'-- Generado: {datetime.now().isoformat()}',
+        '-- Restaurar con: sqlcmd -S servidor -d Sipra -i archivo.sql',
+        '',
+        'SET NOCOUNT ON;',
+        'SET XACT_ABORT ON;',
+        '',
+    ]
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT TABLE_SCHEMA, TABLE_NAME
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_TYPE = 'BASE TABLE'
+            AND TABLE_NAME NOT LIKE 'sys%'
+            ORDER BY TABLE_SCHEMA, TABLE_NAME
+        """)
+        tables = cursor.fetchall()
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT OBJECT_SCHEMA_NAME(object_id), OBJECT_NAME(object_id)
+            FROM sys.identity_columns
+        """)
+        identity_tables = {(r[0], r[1]) for r in cursor.fetchall()}
+
+    for schema, table in tables:
+        full_name = f'[{schema}].[{table}]'
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+                ORDER BY ORDINAL_POSITION
+            """, [schema, table])
+            col_names = [r[0] for r in cursor.fetchall()]
+
+        has_identity = (schema, table) in identity_tables
+        cols_str = ', '.join(f'[{c}]' for c in col_names)
+
+        with connection.cursor() as cursor:
+            cursor.execute(f'SELECT * FROM {full_name}')
+            rows = cursor.fetchall()
+
+        if not rows:
+            lines.append(f'-- Tabla {full_name}: sin datos')
+            lines.append('')
+            continue
+
+        if has_identity:
+            lines.append(f'SET IDENTITY_INSERT {full_name} ON;')
+
+        batch_size = 100
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i + batch_size]
+            values_list = []
+            for row in batch:
+                vals = [_escape_sql_value(v) for v in row]
+                values_list.append(f"({', '.join(vals)})")
+            values_str = ',\n    '.join(values_list)
+            lines.append(f'INSERT INTO {full_name} ({cols_str})')
+            lines.append(f'VALUES\n    {values_str};')
+            lines.append('')
+
+        if has_identity:
+            lines.append(f'SET IDENTITY_INSERT {full_name} OFF;')
+        lines.append('GO')
+        lines.append('')
+
     with open(backup_path, 'w', encoding='utf-8') as f:
-        call_command(
-            'dumpdata',
-            '--natural-foreign',
-            '--natural-primary',
-            stdout=f,
-        )
+        f.write('\n'.join(lines))
+
     return str(backup_path)
 
 
@@ -116,12 +204,13 @@ def list_backups():
 
     backup_dir = ensure_backup_dir()
     backups = []
-    patterns = ['backup_*.sqlite3']
     if is_mssql():
-        patterns = ['backup_*.json']
-    files = []
-    for pattern in patterns:
-        files.extend(list(backup_dir.glob(pattern)))
+        # backups/sql/YYYY-MM-DD/sipra_*.sql
+        sql_base = Path(getattr(settings, 'BACKUP_SQL_DIR', backup_dir / 'sql'))
+        files = list(sql_base.glob('**/sipra_*.sql'))
+        files.extend(backup_dir.glob('backup_*.json'))  # compatibilidad
+    else:
+        files = list(backup_dir.glob('backup_*.sqlite3'))
     for f in sorted(files, reverse=True):
         stat = f.stat()
         backups.append({
@@ -203,15 +292,15 @@ def create_code_backup():
 
 def delete_backup(filename: str):
     """Elimina un archivo de backup de BD. Valida que el nombre sea seguro."""
-    if not filename or '..' in filename or '/' in filename or '\\' in filename:
+    name = Path(filename).name
+    if not name or '..' in name:
         raise RuntimeError("Nombre de archivo no válido")
-    if not filename.endswith('.sqlite3') and not filename.endswith('.sql') and not filename.endswith('.json'):
+    if not (name.endswith('.sqlite3') or name.endswith('.sql') or name.endswith('.json')):
         raise RuntimeError("Solo se pueden eliminar archivos de backup de BD (.sqlite3, .sql, .json)")
-    backup_dir = ensure_backup_dir()
-    path = backup_dir / filename
-    if not path.exists():
-        raise RuntimeError("Archivo de backup no encontrado")
-    if path.resolve() != (backup_dir / filename).resolve():
+    path = _find_backup_path(name)
+    backup_root = Path(settings.BACKUP_DIR)
+    sql_root = Path(getattr(settings, 'BACKUP_SQL_DIR', backup_root / 'sql'))
+    if not str(path.resolve()).startswith(str(backup_root.resolve())) and not str(path.resolve()).startswith(str(sql_root.resolve())):
         raise RuntimeError("Ruta no permitida")
     path.unlink()
     return True
@@ -250,8 +339,8 @@ def list_code_backups():
     return backups
 
 
-def _restore_mssql(backup_path: Path):
-    """Restaura SQL Server desde un dump JSON (dumpdata)."""
+def _restore_mssql_json(backup_path: Path):
+    """Restaura SQL Server desde dump JSON (dumpdata)."""
     from django.core.management import call_command
 
     connection.close()
@@ -265,21 +354,84 @@ def _restore_mssql(backup_path: Path):
     return str(backup_path)
 
 
+def _restore_mssql_sql(backup_path: Path):
+    """Restaura SQL Server desde archivo .sql (INSERTs)."""
+    from django.core.management import call_command
+
+    connection.close()
+    call_command('flush', '--no-input')  # Vacía tablas antes de insertar
+
+    sql_content = backup_path.read_text(encoding='utf-8', errors='replace')
+    batches = re.split(r'\n\s*GO\s*\n', sql_content, flags=re.IGNORECASE)
+    def _disable_fks(cursor):
+        cursor.execute("""
+            SELECT QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' + QUOTENAME(OBJECT_NAME(parent_object_id)),
+                   QUOTENAME(name)
+            FROM sys.foreign_keys
+        """)
+        for schema_table, fk_name in cursor.fetchall():
+            cursor.execute(f"ALTER TABLE {schema_table} NOCHECK CONSTRAINT {fk_name}")
+
+    def _enable_fks(cursor):
+        cursor.execute("""
+            SELECT QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' + QUOTENAME(OBJECT_NAME(parent_object_id)),
+                   QUOTENAME(name)
+            FROM sys.foreign_keys
+        """)
+        for schema_table, fk_name in cursor.fetchall():
+            cursor.execute(f"ALTER TABLE {schema_table} WITH CHECK CHECK CONSTRAINT {fk_name}")
+
+    try:
+        with connection.cursor() as cursor:
+            _disable_fks(cursor)
+        with connection.cursor() as cursor:
+            for batch in batches:
+                batch = batch.strip()
+                if not batch or batch.startswith('--'):
+                    continue
+                if batch.upper() != 'GO':
+                    cursor.execute(batch)
+        with connection.cursor() as cursor:
+            _enable_fks(cursor)
+    except Exception as e:
+        connection.ensure_connection()
+        raise RuntimeError(f"Restore falló: {e}") from e
+    connection.ensure_connection()
+    return str(backup_path)
+
+
+def _find_backup_path(filename: str) -> Path:
+    """Busca el archivo de backup en BACKUP_DIR y subcarpetas."""
+    name = Path(filename).name
+    backup_dir = Path(settings.BACKUP_DIR)
+    sql_base = Path(getattr(settings, 'BACKUP_SQL_DIR', backup_dir / 'sql'))
+    for base in [backup_dir, sql_base]:
+        if (base / name).exists():
+            return base / name
+        for p in base.glob(f'**/{name}'):
+            return p
+    if (backup_dir / filename).exists():
+        return backup_dir / filename
+    raise RuntimeError(f"Archivo de backup no encontrado: {filename}")
+
+
 def restore_from_file(backup_path: str):
     """
     Restaura la base de datos desde un archivo de backup.
-    SQL Server: loaddata desde JSON. SQLite: copia el archivo.
+    SQL Server: .sql (INSERTs) o .json (dumpdata). SQLite: copia el archivo.
     """
     path = Path(backup_path)
-    if not path.is_absolute():
-        path = Path(settings.BACKUP_DIR) / path
+    if not path.is_absolute() or not path.exists():
+        path = _find_backup_path(backup_path)
     if not path.exists():
         raise RuntimeError(f"Archivo de backup no encontrado: {path}")
 
     if is_mssql():
-        if path.suffix.lower() != '.json':
-            raise RuntimeError("Para SQL Server use un backup .json (dumpdata)")
-        return _restore_mssql(path)
+        if path.suffix.lower() == '.sql':
+            return _restore_mssql_sql(path)
+        if path.suffix.lower() == '.json':
+            return _restore_mssql_json(path)
+        raise RuntimeError("Para SQL Server use backup .sql o .json")
 
     db_path = get_db_path()
     if not db_path:

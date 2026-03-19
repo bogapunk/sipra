@@ -2,7 +2,13 @@
 set -e
 
 echo "Ejecutando migraciones..."
-python manage.py migrate --noinput
+for i in 1 2 3 4 5; do
+  if python manage.py migrate --noinput; then
+    break
+  fi
+  echo "Migrate falló (intento $i/5), reintentando en 10s..."
+  sleep 10
+done
 
 echo "Iniciando servidor..."
 exec gunicorn config.wsgi:application \

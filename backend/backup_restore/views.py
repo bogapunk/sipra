@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+from pathlib import Path
 
 from django.utils import timezone
 from rest_framework.views import APIView
@@ -116,9 +117,11 @@ class BackupCreateView(APIView):
             return err
         try:
             result = create_backup()
+            rel = Path(result).name if isinstance(result, str) else ''
+            msg = f'Backup .sql creado correctamente: {rel}' if rel.endswith('.sql') else 'Backup creado correctamente.'
             return Response({
                 'success': True,
-                'message': 'Backup creado correctamente.',
+                'message': msg,
                 'path': result if isinstance(result, str) and os.path.exists(result) else None,
             })
         except Exception as e:

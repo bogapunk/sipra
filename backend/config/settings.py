@@ -215,10 +215,11 @@ LOGGING = {
 }
 
 # Backup & Restore
+# Estructura: backups/sql/YYYY-MM-DD/sipra_*.sql (local y producción)
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', BASE_DIR / 'backups'))
+BACKUP_SQL_DIR = Path(os.environ.get('BACKUP_SQL_DIR', BACKUP_DIR / 'sql'))
 CODE_BACKUP_DIR = Path(os.environ.get('CODE_BACKUP_DIR', BACKUP_DIR / 'code'))
-BACKUP_SCRIPT_PATH = os.environ.get('BACKUP_SCRIPT_PATH', '')  # ej: /opt/scripts/backup.sh
-# Backup: para SQL Server use BACKUP_SCRIPT_PATH o dumpdata (JSON)
+BACKUP_SCRIPT_PATH = os.environ.get('BACKUP_SCRIPT_PATH', '')  # opcional: script externo
 ACTIVE_SESSION_MINUTES = int(os.environ.get('ACTIVE_SESSION_MINUTES', 5))
 JWT_EXPIRES_HOURS = int(os.environ.get('JWT_EXPIRES_HOURS', '8'))
 JWT_ISSUER = _env_str('JWT_ISSUER', 'sipra')
