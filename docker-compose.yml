@@ -11,6 +11,7 @@ services:
       DB_NAME: ${DB_NAME:-Sipra-Test}
       DB_USER: ${DB_USER:-SA}
       DB_PASSWORD: ${DB_PASSWORD}
+      DB_ODBC_DRIVER: ${DB_ODBC_DRIVER:-ODBC Driver 18 for SQL Server}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-3}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-2}
       DEBUG: ${DEBUG:-1}

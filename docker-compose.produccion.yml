@@ -12,7 +12,8 @@ services:
       DB_PORT: 1433
       DB_NAME: Sipra
       DB_USER: SA
-      DB_PASSWORD: Davinci2024#
+      DB_PASSWORD: "Davinci2024#"
+      DB_ODBC_DRIVER: "ODBC Driver 18 for SQL Server"
       DEBUG: "0"
       SECRET_KEY: ${SECRET_KEY:-sipra-produccion-clave-segura-cambiar}
       ALLOWED_HOSTS: 10.1.9.194,localhost,127.0.0.1
