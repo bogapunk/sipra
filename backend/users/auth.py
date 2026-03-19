@@ -45,7 +45,7 @@ class LoginView(APIView):
         except DatabaseError:
             return Response(
                 {
-                    'error': 'No hay conexión con la base de datos PostgreSQL.',
+                    'error': 'No hay conexión con la base de datos.',
                     'code': 'db_unavailable',
                 },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE

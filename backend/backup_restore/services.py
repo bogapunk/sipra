@@ -1,4 +1,4 @@
-"""Servicios de backup y restore para SQLite, PostgreSQL y scripts externos."""
+"""Servicios de backup y restore para SQL Server, SQLite y scripts externos."""
 import os
 import shutil
 import subprocess
@@ -17,9 +17,9 @@ CODE_BACKUP_EXCLUDE = {
 }
 
 
-def is_postgresql():
-    """Indica si la base de datos actual es PostgreSQL."""
-    return settings.DATABASES['default']['ENGINE'] == 'django.db.backends.postgresql'
+def is_mssql():
+    """Indica si la base de datos actual es Microsoft SQL Server."""
+    return settings.DATABASES['default']['ENGINE'] == 'mssql'
 
 
 def get_db_path():
@@ -35,67 +35,6 @@ def ensure_backup_dir():
     backup_dir = Path(settings.BACKUP_DIR)
     backup_dir.mkdir(parents=True, exist_ok=True)
     return backup_dir
-
-
-def _resolve_postgres_binary(binary_name: str, setting_name: str = '') -> str | None:
-    """
-    Intenta ubicar binarios de PostgreSQL aunque no estén en el PATH.
-    Prioriza configuración explícita, luego PATH y finalmente rutas comunes.
-    """
-    configured_path = getattr(settings, setting_name, '') if setting_name else ''
-    if configured_path and Path(configured_path).is_file():
-        return configured_path
-
-    binary_in_path = shutil.which(binary_name)
-    if binary_in_path:
-        return binary_in_path
-
-    candidate_names = [binary_name]
-    if os.name == 'nt' and not binary_name.lower().endswith('.exe'):
-        candidate_names.insert(0, f'{binary_name}.exe')
-
-    candidate_paths: list[Path] = []
-
-    if os.name == 'nt':
-        windows_roots = [
-            Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'PostgreSQL',
-            Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'PostgreSQL',
-            Path(r'C:\PostgreSQL'),
-        ]
-        for root in windows_roots:
-            if not root.exists():
-                continue
-            for version_dir in sorted(root.glob('*'), reverse=True):
-                if not version_dir.is_dir():
-                    continue
-                bin_dir = version_dir / 'bin'
-                for candidate_name in candidate_names:
-                    candidate_paths.append(bin_dir / candidate_name)
-    else:
-        unix_roots = [
-            Path('/usr/bin'),
-            Path('/usr/local/bin'),
-            Path('/opt/homebrew/bin'),
-            Path('/opt/local/bin'),
-        ]
-        for root in unix_roots:
-            for candidate_name in candidate_names:
-                candidate_paths.append(root / candidate_name)
-
-        postgres_root = Path('/usr/lib/postgresql')
-        if postgres_root.exists():
-            for version_dir in sorted(postgres_root.glob('*'), reverse=True):
-                if not version_dir.is_dir():
-                    continue
-                bin_dir = version_dir / 'bin'
-                for candidate_name in candidate_names:
-                    candidate_paths.append(bin_dir / candidate_name)
-
-    for candidate in candidate_paths:
-        if candidate.is_file():
-            return str(candidate)
-
-    return None
 
 
 def run_external_backup_script():
@@ -120,42 +59,30 @@ def run_external_backup_script():
         return None, str(e)
 
 
-def _create_postgresql_backup():
-    """Crea backup de PostgreSQL usando pg_dump."""
-    db = settings.DATABASES['default']
+def _create_mssql_backup():
+    """Crea backup de SQL Server usando Django dumpdata (JSON)."""
+    from django.core.management import call_command
+
     backup_dir = ensure_backup_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_name = f"backup_{timestamp}.sql"
+    backup_name = f"backup_{timestamp}.json"
     backup_path = backup_dir / backup_name
 
-    env = os.environ.copy()
-    env['PGPASSWORD'] = db.get('PASSWORD', '')
-    pg_dump_bin = _resolve_postgres_binary('pg_dump', 'PG_DUMP_PATH')
-    if not pg_dump_bin:
-        raise RuntimeError(
-            "pg_dump no encontrado. Instale PostgreSQL client o configure PG_DUMP_PATH para generar backups .sql."
+    with open(backup_path, 'w', encoding='utf-8') as f:
+        call_command(
+            'dumpdata',
+            '--natural-foreign',
+            '--natural-primary',
+            stdout=f,
         )
-    cmd = [
-        pg_dump_bin,
-        '-h', db.get('HOST', 'localhost'),
-        '-p', str(db.get('PORT', 5432)),
-        '-U', db.get('USER', 'postgres'),
-        '-d', db.get('NAME', 'sipra'),
-        '-F', 'p',  # formato plain SQL
-        '-f', str(backup_path),
-    ]
-    try:
-        subprocess.run(cmd, env=env, check=True, capture_output=True, timeout=300)
-        return str(backup_path)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"pg_dump falló: {e.stderr.decode() if e.stderr else str(e)}")
+    return str(backup_path)
 
 
 def create_backup():
     """
     Crea un backup de la base de datos.
     Si BACKUP_SCRIPT_PATH está configurado, ejecuta ese script.
-    Si PostgreSQL: usa pg_dump.
+    Si SQL Server: usa dumpdata (JSON).
     Si SQLite: copia el archivo .sqlite3.
     """
     script_path = getattr(settings, 'BACKUP_SCRIPT_PATH', '') or ''
@@ -165,8 +92,8 @@ def create_backup():
             raise RuntimeError(msg)
         return msg
 
-    if is_postgresql():
-        return _create_postgresql_backup()
+    if is_mssql():
+        return _create_mssql_backup()
 
     db_path = get_db_path()
     if not db_path or not db_path.exists():
@@ -182,7 +109,7 @@ def create_backup():
 
 
 def list_backups():
-    """Lista los archivos de backup disponibles (SQLite o PostgreSQL)."""
+    """Lista los archivos de backup disponibles (SQL Server, SQLite)."""
     script_path = getattr(settings, 'BACKUP_SCRIPT_PATH', '') or ''
     if script_path:
         return []  # Con script externo, no listamos desde Django
@@ -190,8 +117,8 @@ def list_backups():
     backup_dir = ensure_backup_dir()
     backups = []
     patterns = ['backup_*.sqlite3']
-    if is_postgresql():
-        patterns = ['backup_*.sql']
+    if is_mssql():
+        patterns = ['backup_*.json']
     files = []
     for pattern in patterns:
         files.extend(list(backup_dir.glob(pattern)))
@@ -278,8 +205,8 @@ def delete_backup(filename: str):
     """Elimina un archivo de backup de BD. Valida que el nombre sea seguro."""
     if not filename or '..' in filename or '/' in filename or '\\' in filename:
         raise RuntimeError("Nombre de archivo no válido")
-    if not filename.endswith('.sqlite3') and not filename.endswith('.sql'):
-        raise RuntimeError("Solo se pueden eliminar archivos de backup de BD")
+    if not filename.endswith('.sqlite3') and not filename.endswith('.sql') and not filename.endswith('.json'):
+        raise RuntimeError("Solo se pueden eliminar archivos de backup de BD (.sqlite3, .sql, .json)")
     backup_dir = ensure_backup_dir()
     path = backup_dir / filename
     if not path.exists():
@@ -323,30 +250,17 @@ def list_code_backups():
     return backups
 
 
-def _restore_postgresql(backup_path: Path):
-    """Restaura PostgreSQL desde un dump SQL."""
-    db = settings.DATABASES['default']
-    env = os.environ.copy()
-    env['PGPASSWORD'] = db.get('PASSWORD', '')
-    psql_bin = _resolve_postgres_binary('psql', 'PSQL_PATH')
-    if not psql_bin:
-        raise RuntimeError(
-            "psql no encontrado. Instale PostgreSQL client o configure PSQL_PATH para restaurar backups .sql."
-        )
-    cmd = [
-        psql_bin,
-        '-h', db.get('HOST', 'localhost'),
-        '-p', str(db.get('PORT', 5432)),
-        '-U', db.get('USER', 'postgres'),
-        '-d', db.get('NAME', 'sipra'),
-        '-f', str(backup_path),
-    ]
+def _restore_mssql(backup_path: Path):
+    """Restaura SQL Server desde un dump JSON (dumpdata)."""
+    from django.core.management import call_command
+
     connection.close()
     try:
-        subprocess.run(cmd, env=env, check=True, capture_output=True, timeout=600)
-    except subprocess.CalledProcessError as e:
+        call_command('flush', '--no-input')
+        call_command('loaddata', str(backup_path))
+    except Exception as e:
         connection.ensure_connection()
-        raise RuntimeError(f"psql falló: {e.stderr.decode() if e.stderr else str(e)}")
+        raise RuntimeError(f"Restore falló: {e}") from e
     connection.ensure_connection()
     return str(backup_path)
 
@@ -354,7 +268,7 @@ def _restore_postgresql(backup_path: Path):
 def restore_from_file(backup_path: str):
     """
     Restaura la base de datos desde un archivo de backup.
-    SQLite: copia el archivo. PostgreSQL: ejecuta psql con el dump.
+    SQL Server: loaddata desde JSON. SQLite: copia el archivo.
     """
     path = Path(backup_path)
     if not path.is_absolute():
@@ -362,14 +276,14 @@ def restore_from_file(backup_path: str):
     if not path.exists():
         raise RuntimeError(f"Archivo de backup no encontrado: {path}")
 
-    if is_postgresql():
-        if path.suffix.lower() != '.sql':
-            raise RuntimeError("Para PostgreSQL use un backup .sql (pg_dump)")
-        return _restore_postgresql(path)
+    if is_mssql():
+        if path.suffix.lower() != '.json':
+            raise RuntimeError("Para SQL Server use un backup .json (dumpdata)")
+        return _restore_mssql(path)
 
     db_path = get_db_path()
     if not db_path:
-        raise RuntimeError("Restore solo soportado para SQLite o PostgreSQL")
+        raise RuntimeError("Restore solo soportado para SQL Server o SQLite")
 
     connection.close()
     shutil.copy2(path, db_path)

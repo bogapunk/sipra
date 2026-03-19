@@ -1,10 +1,9 @@
 import os
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Cargar .env si existe (para DATABASE_URL, etc.)
+# Cargar .env si existe (para DB_*, etc.)
 _env_path = BASE_DIR / '.env'
 if not _env_path.exists():
     _env_path = BASE_DIR.parent / '.env'
@@ -88,7 +87,7 @@ TEMPLATES = [
     },
 ]
 
-# PostgreSQL obligatorio en este proyecto.
+# Base de datos: Microsoft SQL Server 2022 (DB_TYPE=mssql)
 def _env_str(name: str, default: str = '') -> str:
     return (os.environ.get(name, default) or default).strip()
 
@@ -104,35 +103,32 @@ def _env_host(name: str, default: str = 'localhost') -> str:
     return raw.split()[0]
 
 
-# PostgreSQL configurable por variables de entorno (sanitiza espacios)
-POSTGRES_DATABASE = {
-    'ENGINE': 'django.db.backends.postgresql',
-    'NAME': _env_str('POSTGRES_DB_NAME', 'sipra'),
-    'USER': _env_str('POSTGRES_DB_USER', 'postgres'),
-    'PASSWORD': _env_str('POSTGRES_DB_PASSWORD', ''),
-    'HOST': _env_host('POSTGRES_DB_HOST', 'localhost'),
-    'PORT': int(_env_str('POSTGRES_DB_PORT', '5432')),
-    'CONN_MAX_AGE': int(_env_str('POSTGRES_CONN_MAX_AGE', '600')),
-}
-
-
-def _database_from_url(url: str) -> dict:
-    parsed = urlparse(url)
-    if parsed.scheme not in ('postgres', 'postgresql'):
-        raise ValueError('DATABASE_URL debe usar esquema postgres/postgresql.')
+def _build_mssql_database() -> dict:
+    """Configuración para Microsoft SQL Server (DB_TYPE=mssql)."""
+    driver = _env_str(
+        'DB_ODBC_DRIVER',
+        'ODBC Driver 17 for SQL Server',  # Driver 17 más común en Windows; use 18 si lo tiene
+    )
     return {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': unquote((parsed.path or '/').lstrip('/')),
-        'USER': unquote(parsed.username or ''),
-        'PASSWORD': unquote(parsed.password or ''),
-        'HOST': parsed.hostname or 'localhost',
-        'PORT': int(parsed.port or 5432),
-        'CONN_MAX_AGE': int(_env_str('POSTGRES_CONN_MAX_AGE', '600')),
+        'ENGINE': 'mssql',
+        'NAME': _env_str('DB_NAME', 'Sipra'),
+        'USER': _env_str('DB_USER', 'SA'),
+        'PASSWORD': _env_str('DB_PASSWORD', ''),
+        'HOST': _env_host('DB_HOST', 'localhost'),
+        'PORT': _env_str('DB_PORT', '1433') or '',
+        'CONN_MAX_AGE': int(_env_str('DB_CONN_MAX_AGE', '600')),
+        'OPTIONS': {
+            'driver': driver,
+            'extra_params': 'TrustServerCertificate=yes',
+        },
     }
 
 
-DATABASE_URL = _env_str('DATABASE_URL')
-DEFAULT_DATABASE = _database_from_url(DATABASE_URL) if DATABASE_URL else POSTGRES_DATABASE
+DB_TYPE = _env_str('DB_TYPE', 'mssql').lower()
+if DB_TYPE != 'mssql':
+    raise ValueError('SIPRA usa exclusivamente Microsoft SQL Server. Defina DB_TYPE=mssql.')
+
+DEFAULT_DATABASE = _build_mssql_database()
 
 DATABASES = {
     'default': DEFAULT_DATABASE,
@@ -222,7 +218,7 @@ LOGGING = {
 BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', BASE_DIR / 'backups'))
 CODE_BACKUP_DIR = Path(os.environ.get('CODE_BACKUP_DIR', BACKUP_DIR / 'code'))
 BACKUP_SCRIPT_PATH = os.environ.get('BACKUP_SCRIPT_PATH', '')  # ej: /opt/scripts/backup.sh
-PG_DUMP_PATH = os.environ.get('PG_DUMP_PATH', '')  # opcional: ruta absoluta a pg_dump
+# Backup: para SQL Server use BACKUP_SCRIPT_PATH o dumpdata (JSON)
 ACTIVE_SESSION_MINUTES = int(os.environ.get('ACTIVE_SESSION_MINUTES', 5))
 JWT_EXPIRES_HOURS = int(os.environ.get('JWT_EXPIRES_HOURS', '8'))
 JWT_ISSUER = _env_str('JWT_ISSUER', 'sipra')

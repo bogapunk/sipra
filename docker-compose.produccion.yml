@@ -1,8 +1,5 @@
-# Producción: PostgreSQL en contenedor "postgres" (-p 5433:5432), app en 8085
+# Producción: Microsoft SQL Server 2022 (10.1.9.113), app en 8085
 # Usar con: docker-compose -f docker-compose.produccion.yml up -d
-#
-# IMPORTANTE: Conectar postgres a la red sipra antes de levantar:
-#   docker network connect sipra_default postgres
 
 services:
   backend:
@@ -10,13 +7,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      DB_PROVIDER: postgres
-      DATABASE_URL: "postgresql://admin:qlwpuc%23EEVfs6zY4@postgres:5432/sipra"
-      POSTGRES_DB_HOST: postgres
-      POSTGRES_DB_PORT: 5432
-      POSTGRES_DB_NAME: sipra
-      POSTGRES_DB_USER: admin
-      POSTGRES_DB_PASSWORD: "qlwpuc#EEVfs6zY4"
+      DB_TYPE: mssql
+      DB_HOST: 10.1.9.113
+      DB_PORT: 1433
+      DB_NAME: Sipra
+      DB_USER: SA
+      DB_PASSWORD: Davinci2024#
       DEBUG: "0"
       SECRET_KEY: ${SECRET_KEY:-sipra-produccion-clave-segura-cambiar}
       ALLOWED_HOSTS: 10.1.9.194,localhost,127.0.0.1
