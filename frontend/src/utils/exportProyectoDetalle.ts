@@ -227,21 +227,37 @@ export async function exportarProyectoDetalle(
   row++
 
   // Tareas
-  ws.addRow(['Tareas (Orden | Título | Tarea padre | Estado | Avance | Fecha vencimiento)'])
+  ws.addRow(['Tareas (Orden | Título | Tarea padre | Estado | Avance | Inicio | Área/Secretaría | Vencimiento)'])
   ws.getRow(row).font = { bold: true, size: 12 }
   row++
   if (tareas.length) {
-    ws.addRow(['Orden', 'Título', 'Tarea padre', 'Estado', 'Avance %', 'Fecha de vencimiento'])
+    ws.addRow([
+      'Orden',
+      'Título',
+      'Tarea padre',
+      'Estado',
+      'Avance %',
+      'Fecha de inicio',
+      'Área / Secretaría',
+      'Fecha de vencimiento',
+    ])
     ws.getRow(row).eachCell((c) => { c.font = { bold: true }; c.fill = headerStyle.fill })
     row++
     tareas.forEach((item) => {
       const t = item.tarea as Record<string, unknown>
+      const dep =
+        (typeof t.organizacion_nombre === 'string' && t.organizacion_nombre.trim()) ||
+        (t.area_nombre ? `Área: ${t.area_nombre}` : '') ||
+        (t.secretaria_nombre ? `Secretaría: ${t.secretaria_nombre}` : '') ||
+        '—'
       ws.addRow([
         item.orden,
         t.titulo || '',
         item.esSubtarea ? (t.tarea_padre_nombre || '—') : '—',
         t.estado || '',
         String(t.porcentaje_avance ?? 0),
+        t.fecha_inicio || '—',
+        dep,
         t.fecha_vencimiento || '—',
       ])
       row++

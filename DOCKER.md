@@ -1,116 +1,58 @@
 # Despliegue con Docker - SIP-AIF
 
-Guía para ejecutar SIP-AIF (Sistema Integral de Proyectos) en producción con Docker.
+Guía para ejecutar SIP-AIF con Docker. La base de datos es **Microsoft SQL Server** (externa); no se usa PostgreSQL.
 
 ## Requisitos
 
-- Docker
-- Docker Compose
+- Docker y Docker Compose
+- Archivo `.env` en la raíz con `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_TYPE=mssql`, etc.
 
 ## Pasos para poner en marcha
 
 ### 1. Construir y levantar los contenedores
 
-Desde la raíz del proyecto:
-
 ```bash
-docker compose up -d --build
+docker compose --env-file .env up -d --build
 ```
 
-Esto construye las imágenes y levanta:
-- **PostgreSQL** (base de datos)
-- **Backend** (Django + Gunicorn)
-- **Frontend** (Nginx sirviendo la app Vue)
+Esto levanta:
+
+- **Backend** (Django + Gunicorn, conexión a SQL Server según `.env`)
+- **Frontend** (Nginx sirviendo la app Vue y proxy `/api` al backend)
 
 ### 2. Acceder al sistema
 
-Abre el navegador en: **http://localhost**
+**http://localhost** (puerto 80 del frontend)
 
-(Puerto 80 por defecto. Si 80 está ocupado, cambia en `docker-compose.yml` la línea `"80:80"` por `"8080:80"` y accede a http://localhost:8080)
-
-### 3. Crear datos iniciales (primera vez)
-
-Si es la primera vez y necesitas usuarios de prueba:
+### 3. Datos iniciales (primera vez)
 
 ```bash
 docker compose exec backend python manage.py crear_datos_iniciales
-```
-
-Para crear un superusuario manualmente:
-
-```bash
-docker compose exec backend python manage.py createsuperuser
 ```
 
 ## Comandos útiles
 
 | Comando | Descripción |
 |---------|-------------|
-| `docker compose up -d --build` | Construir y levantar en segundo plano |
-| `docker compose down` | Detener y eliminar contenedores |
-| `docker compose logs -f` | Ver logs en tiempo real |
-| `docker compose ps` | Ver estado de los contenedores |
-| `docker compose exec backend python manage.py migrate` | Ejecutar migraciones |
-| `docker compose exec backend python manage.py crear_datos_iniciales` | Cargar datos iniciales |
+| `docker compose up -d --build` | Construir y levantar |
+| `docker compose down` | Detener contenedores |
+| `docker compose logs -f backend` | Logs del backend |
+| `docker compose exec backend python manage.py migrate` | Migraciones |
 
-## Variables de entorno (producción)
+## Variables de entorno
 
-Crea un archivo `.env` en la raíz del proyecto para producción:
-
-```env
-SECRET_KEY=tu-clave-secreta-muy-larga-y-aleatoria
-```
-
-Para cambiar la contraseña de PostgreSQL, edita `docker-compose.yml` en el servicio `db` y `backend` (variable `DATABASE_URL`).
+Ver `.env.example`. Clave: `SECRET_KEY`, y todas las `DB_*` para SQL Server.
 
 ## Estructura
 
 ```
-db (PostgreSQL)  →  backend (Django:8001)  ←  frontend (Nginx:80)
-                         ↑
-                    Base de datos
+SQL Server (externo)  ←  backend (Django :8001 dentro de la red Docker)
+                              ↑
+                        frontend (Nginx :80) → proxy /api → backend
 ```
 
-- El usuario accede a **puerto 80** (frontend)
-- Nginx sirve la app Vue y redirige `/api` al backend
-- El backend usa PostgreSQL como base de datos
+## Producción
 
-## Reinicio automático
+Usar `docker-compose.produccion.yml` y, si aplica, proxy HTTPS (ver `deploy/nginx-sipra.example.conf`).
 
-Los servicios tienen `restart: unless-stopped`, por lo que:
-- Se reinician si fallan
-- Se inician al arrancar el servidor (si Docker está configurado para iniciarse al boot)
-
-## Persistencia de datos
-
-Los datos de PostgreSQL se guardan en el volumen `postgres_data`. Aunque elimines los contenedores con `docker compose down`, los datos se mantienen. Para borrarlos:
-
-```bash
-docker compose down -v
-```
-
-## Producción con PostgreSQL externo
-
-Usa `docker-compose.produccion.yml` (archivo standalone, sin db local):
-
-```bash
-docker-compose -f docker-compose.produccion.yml up -d --build
-```
-
-El frontend se expone en el puerto **8081**.
-
-### Actualizar frontend sin rebuild (volumen vinculado)
-
-El `docker-compose.produccion.yml` monta el directorio `./frontend` como volumen. Tras un `git pull` **no hace falta reconstruir la imagen**:
-
-1. Actualiza el código:
-   ```bash
-   git pull
-   ```
-
-2. Reinicia el frontend (reconstruye al iniciar):
-   ```bash
-   docker-compose -f docker-compose.produccion.yml up -d --force-recreate frontend
-   ```
-
-El contenedor ejecutará `npm ci` y `npm run build` al arrancar y servirá la nueva versión.
+Los backups de BD en volumen Docker: `sipra_backups` → `/app/backups` en el backend.

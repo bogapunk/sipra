@@ -1,4 +1,5 @@
-# Desarrollo local: usa .env con DB_* apuntando a SQL Server (Sipra-Test)
+# SOLO desarrollo local (Vite 5173 + backend 8001 en el host, o este compose).
+# Producción: usar docker-compose.produccion.yml (no mezclar con este archivo).
 services:
   backend:
     build:

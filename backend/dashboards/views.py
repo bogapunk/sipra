@@ -9,7 +9,7 @@ from collections import defaultdict
 from hashlib import md5
 from urllib.parse import urlencode
 from tasks.models import Tarea, HistorialTarea
-from projects.models import Proyecto, ProyectoArea, Eje, Plan, Programa, ObjetivoEstrategico, Indicador
+from projects.models import Proyecto, ProyectoArea, ProyectoSecretaria, Eje, Plan, Programa, ObjetivoEstrategico, Indicador
 from config.pagination import ProjectDashboardPagination
 
 
@@ -35,9 +35,12 @@ def _bulk_avances_historiales(proyecto_ids):
     return avances, ultimos
 from users.access import (
     ROL_ADMIN,
+    ROL_CARGA,
     ROL_VISUALIZACION,
+    dedupe_queryset_by_pk,
     filter_projects_for_user,
     filter_tasks_for_user,
+    is_admin,
     require_roles,
 )
 
@@ -81,33 +84,35 @@ class ProyectosPorUsuarioView(APIView):
             ids_participacion.update(
                 Proyecto.objects.filter(secretaria_id=usuario.secretaria_id).values_list('id', flat=True)
             )
+            ids_participacion.update(
+                ProyectoSecretaria.objects.filter(secretaria_id=usuario.secretaria_id).values_list('proyecto_id', flat=True)
+            )
         ids_participacion.update(
             ProyectoEquipo.objects.filter(usuario_id=usuario_id).values_list('proyecto_id', flat=True)
         )
+        # Misma regla que el listado de tareas / proyectos API: participación vía tareas
+        # (responsable, área/secretaría en tarea, equipo del proyecto, etc.).
         ids_participacion.update(
-            Tarea.objects.filter(responsable_id=usuario_id).values_list('proyecto_id', flat=True).distinct()
+            filter_tasks_for_user(
+                Tarea.objects.filter(proyecto_id__isnull=False),
+                usuario,
+            ).values_list('proyecto_id', flat=True).distinct()
         )
-        if usuario.area_id:
-            ids_participacion.update(
-                Tarea.objects.filter(area_id=usuario.area_id).values_list('proyecto_id', flat=True).distinct()
-            )
-        if usuario.secretaria_id:
-            ids_participacion.update(
-                Tarea.objects.filter(secretaria_id=usuario.secretaria_id).values_list('proyecto_id', flat=True).distinct()
-            )
 
         ids_participacion -= ids_a_cargo  # No duplicar en participación si ya está a cargo
         ids_participacion.discard(None)
 
         base_qs = Proyecto.objects.select_related('creado_por', 'secretaria', 'usuario_responsable', 'area').prefetch_related(
             Prefetch('proyectoarea_set', queryset=ProyectoArea.objects.select_related('area')),
+            Prefetch('proyectosecretaria_set', queryset=ProyectoSecretaria.objects.select_related('secretaria')),
             Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario'))
         )
-        proyectos_a_cargo = base_qs.filter(id__in=ids_a_cargo).distinct() if ids_a_cargo else Proyecto.objects.none()
-        proyectos_participacion = base_qs.filter(id__in=ids_participacion).distinct() if ids_participacion else Proyecto.objects.none()
+        # Sin .distinct(): en SQL Server DISTINCT + columnas TEXT en select_related falla (421).
+        proyectos_a_cargo = base_qs.filter(id__in=ids_a_cargo) if ids_a_cargo else Proyecto.objects.none()
+        proyectos_participacion = base_qs.filter(id__in=ids_participacion) if ids_participacion else Proyecto.objects.none()
 
         from projects.serializers import ProyectoDashboardSerializer
-        from tasks.serializers import TareaSerializer
+        from tasks.serializers import TareaListSerializer
         todos_ids = list(ids_a_cargo | ids_participacion)
         avances, ultimos_historiales = _bulk_avances_historiales(todos_ids)
         ctx = {'avances': avances, 'ultimos_historiales': ultimos_historiales}
@@ -127,8 +132,12 @@ class ProyectosPorUsuarioView(APIView):
             condiciones_tp |= Q(area_id=usuario.area_id)
         if usuario.secretaria_id:
             condiciones_tp |= Q(secretaria_id=usuario.secretaria_id)
-        tareas_particulares_qs = tareas_particulares_qs.filter(condiciones_tp).distinct()
-        tareas_particulares_data = TareaSerializer(tareas_particulares_qs.select_related('area', 'secretaria', 'responsable'), many=True).data
+        tp_filtradas = tareas_particulares_qs.filter(condiciones_tp)
+        tp_ids = tp_filtradas.values_list('id', flat=True).order_by().distinct()
+        tareas_particulares_data = TareaListSerializer(
+            Tarea.objects.filter(id__in=tp_ids).select_related('area', 'secretaria', 'responsable'),
+            many=True,
+        ).data
 
         return Response({
             'proyectos_a_cargo': a_cargo_data,
@@ -197,41 +206,43 @@ class AlertasVencimientoView(APIView):
 
 
 class ProyectosDashboardView(APIView):
-    """Lista de proyectos con avance actualizado y fecha última actualización (para Admin/Visualizador)."""
+    """Lista de proyectos con avance actualizado y fecha última actualización (Admin, Visualización o Carga acotada)."""
     def get(self, request):
         require_roles(
             request.user,
             ROL_ADMIN,
             ROL_VISUALIZACION,
-            message='Solo Administrador o Visualización pueden consultar el dashboard general.'
+            ROL_CARGA,
+            message='Solo Administrador, Visualización o Carga pueden consultar este listado.',
         )
         from projects.models import ProyectoEquipo
         proyectos = Proyecto.objects.select_related('creado_por', 'secretaria', 'usuario_responsable', 'area').prefetch_related(
             Prefetch('proyectoarea_set', queryset=ProyectoArea.objects.select_related('area')),
+            Prefetch('proyectosecretaria_set', queryset=ProyectoSecretaria.objects.select_related('secretaria')),
             Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario'))
         ).order_by('id')
+        if not is_admin(request.user):
+            proyectos = filter_projects_for_user(proyectos, request.user)
         area_id = request.query_params.get('area')
         secretaria_id = request.query_params.get('secretaria')
         estado = request.query_params.get('estado')
-        search = (request.query_params.get('search') or '').strip()
+        search = (request.query_params.get('search') or request.query_params.get('q') or '').strip()
         vencimiento = request.query_params.get('vencimiento')
         if area_id:
-            proyectos = proyectos.filter(area_id=area_id)
+            proyectos = dedupe_queryset_by_pk(
+                proyectos.filter(Q(area_id=area_id) | Q(proyectoarea__area_id=area_id))
+            )
         if secretaria_id:
-            proyectos = proyectos.filter(secretaria_id=secretaria_id)
+            proyectos = dedupe_queryset_by_pk(
+                proyectos.filter(
+                    Q(secretaria_id=secretaria_id) | Q(proyectosecretaria_set__secretaria_id=secretaria_id)
+                )
+            )
         if estado:
             proyectos = proyectos.filter(estado=estado)
         if search:
-            proyectos = proyectos.filter(
-                Q(nombre__icontains=search) |
-                Q(descripcion__icontains=search) |
-                Q(area__nombre__icontains=search) |
-                Q(secretaria__nombre__icontains=search) |
-                Q(usuario_responsable__nombre__icontains=search) |
-                Q(usuario_responsable__apellido__icontains=search) |
-                Q(creado_por__nombre__icontains=search) |
-                Q(creado_por__apellido__icontains=search)
-            )
+            from projects.search import aplicar_busqueda_proyectos
+            proyectos = aplicar_busqueda_proyectos(proyectos, search)
         if vencimiento:
             hoy = timezone.now().date()
             limite = hoy + timedelta(days=7)
@@ -244,12 +255,15 @@ class ProyectosDashboardView(APIView):
                 )
             elif vencimiento == 'en-plazo':
                 proyectos = proyectos.exclude(estado='Finalizado').filter(fecha_fin_estimada__gt=limite)
+        from projects.querysets import proyecto_dashboard_list_qs
+        proyectos = proyecto_dashboard_list_qs(proyectos)
         from projects.serializers import ProyectoDashboardSerializer
         cache_query = request.query_params.copy()
         cache_key_raw = f"{request.user.id}|{urlencode(sorted(cache_query.items()), doseq=True)}"
         cache_key = f"dashboard_proyectos:{md5(cache_key_raw.encode('utf-8')).hexdigest()}"
         cached_payload = cache.get(cache_key)
-        if cached_payload is not None:
+        # No usar caché cuando hay búsqueda: evita respuestas vacías o desactualizadas por claves ambiguas.
+        if cached_payload is not None and not search:
             return Response(cached_payload)
         paginator = ProjectDashboardPagination()
         page = paginator.paginate_queryset(proyectos, request)
@@ -528,7 +542,9 @@ class DashboardAnaliticoView(APIView):
         if secretaria_id:
             proyectos_qs = proyectos_qs.filter(secretaria_id=secretaria_id)
         if area_id:
-            proyectos_qs = proyectos_qs.filter(Q(area_id=area_id) | Q(proyectoarea__area_id=area_id)).distinct()
+            proyectos_qs = dedupe_queryset_by_pk(
+                proyectos_qs.filter(Q(area_id=area_id) | Q(proyectoarea__area_id=area_id))
+            )
         if estado_filtro:
             proyectos_qs = proyectos_qs.filter(estado=estado_filtro)
 

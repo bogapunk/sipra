@@ -10,6 +10,9 @@
   --sipra-primary-light: #1565c0;
   --sipra-border: #e2e8f0;
   --sipra-bg-subtle: #f8fafc;
+  /* Hover de filas en tablas: más contraste que el fondo blanco sin perder tono institucional */
+  --sipra-table-row-hover: #e2ebf8;
+  --sipra-table-row-hover-transition: background-color 0.16s ease;
 }
 
 /* Estilos globales para botones - tamaño y alineación uniformes en todo el sistema */
@@ -64,21 +67,178 @@
   color: white;
 }
 
-/* Columna de acciones en tablas - contenido centrado para uniformidad */
-.table .actions-cell {
-  white-space: nowrap;
+/* Variantes por función (tablas Ver / Asignar / Editar; Eliminar sigue en btn-action-danger) */
+.btn-action-ver {
+  border-color: #0284c7;
+  background: #e0f2fe;
+  color: #0369a1;
+}
+.btn-action-ver:hover {
+  background: #0284c7;
+  color: #fff;
+}
+.btn-action-asignar {
+  border-color: #16a34a;
+  background: #ecfdf5;
+  color: #15803d;
+}
+.btn-action-asignar:hover {
+  background: #16a34a;
+  color: #fff;
+}
+.btn-action-editar {
+  border-color: #d97706;
+  background: #fffbeb;
+  color: #b45309;
+}
+.btn-action-editar:hover {
+  background: #d97706;
+  color: #fff;
+}
+
+/* Columna de acciones: flex para alinear botones al mismo eje vertical (evita desnivel por baseline con iconos/emojis) */
+.table .actions-cell,
+.app-table .actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
   vertical-align: middle;
   text-align: center !important;
+}
+/* Proyectos y Tareas: una sola fila de botones; el desplazamiento horizontal lo resuelve .table-wrapper */
+.proyectos-panel-table .table td.actions-cell,
+.tareas-panel-table .table td.actions-cell {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.proyectos-panel-table .table .actions-cell .btn-action,
+.proyectos-panel-table .table .actions-cell .btn-action-danger,
+.proyectos-panel-table .table .actions-cell .btn-action-warn,
+.proyectos-panel-table .table .actions-cell .btn-action-success,
+.tareas-panel-table .table .actions-cell .btn-action,
+.tareas-panel-table .table .actions-cell .btn-action-danger,
+.tareas-panel-table .table .actions-cell .btn-action-warn,
+.tareas-panel-table .table .actions-cell .btn-action-success {
+  white-space: nowrap;
 }
 /* Encabezado Acciones centrado para uniformidad visual */
 .table th.actions-header {
   text-align: center !important;
 }
+/* Celdas «Acciones» (variante .acciones en auditoría) */
+.table th.acciones,
+.table td.acciones {
+  text-align: center !important;
+  vertical-align: middle;
+}
+.table td.acciones {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+/* Columna Avance: encabezado y celdas centrados en todas las tablas */
+.table th.col-avance,
+.table td.col-avance,
+.app-table th.col-avance,
+.app-table td.col-avance {
+  text-align: center !important;
+  vertical-align: middle;
+}
+.table-shell th.col-avance,
+.table-shell td.col-avance {
+  text-align: center !important;
+  vertical-align: middle;
+}
+
+/* Usuarios: columna Área / Secretaría centrada */
+.table th.col-area-secretaria,
+.table td.col-area-secretaria,
+.app-table th.col-area-secretaria,
+.app-table td.col-area-secretaria {
+  text-align: center !important;
+  vertical-align: middle;
+}
 .table .actions-cell .btn-action,
 .table .actions-cell .btn-action-danger,
 .table .actions-cell .btn-action-warn,
-.table .actions-cell .btn-action-success {
-  margin-right: 0.5rem;
+.table .actions-cell .btn-action-success,
+.app-table .actions-cell .btn-action,
+.app-table .actions-cell .btn-action-danger,
+.app-table .actions-cell .btn-action-warn,
+.app-table .actions-cell .btn-action-success {
+  margin-right: 0;
+  padding: 0.18rem 0.4rem;
+  font-size: 0.68rem;
+  min-height: 1.75rem;
+  min-width: 0;
+  flex-shrink: 0;
+  gap: 0.24rem;
+  line-height: 1.2;
+  font-weight: 600;
+}
+.table .actions-cell .btn-icon-sm,
+.app-table .actions-cell .btn-icon-sm {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+}
+/* Variante compacta explícita (Proyectos/Tareas/Usuarios): un poco más pequeña que la base de tabla */
+.table .actions-cell .btn-action.btn-action-compact,
+.table .actions-cell .btn-action-danger.btn-action-compact,
+.app-table .actions-cell .btn-action.btn-action-compact,
+.app-table .actions-cell .btn-action-danger.btn-action-compact {
+  padding: 0.14rem 0.34rem;
+  font-size: 0.64rem;
+  min-height: 1.58rem;
+  margin-right: 0;
+}
+.table .actions-cell .btn-action.btn-action-compact .btn-icon-sm,
+.app-table .actions-cell .btn-action.btn-action-compact .btn-icon-sm {
+  width: 0.68rem;
+  height: 0.68rem;
+}
+
+/* Botones en columna Acciones: leve zoom al hover (tablas y celdas equivalentes) */
+.table .actions-cell .btn-action,
+.table .actions-cell .btn-action-danger,
+.table .actions-cell .btn-action-warn,
+.table .actions-cell .btn-action-success,
+.app-table .actions-cell .btn-action,
+.app-table .actions-cell .btn-action-danger,
+.app-table .actions-cell .btn-action-warn,
+.app-table .actions-cell .btn-action-success {
+  transition: transform 0.15s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.15s ease;
+}
+.table .actions-cell .btn-action:hover,
+.table .actions-cell .btn-action-danger:hover,
+.table .actions-cell .btn-action-warn:hover,
+.table .actions-cell .btn-action-success:hover,
+.table .actions-cell .btn-action-ver:hover,
+.table .actions-cell .btn-action-asignar:hover,
+.table .actions-cell .btn-action-editar:hover,
+.app-table .actions-cell .btn-action:hover,
+.app-table .actions-cell .btn-action-danger:hover,
+.app-table .actions-cell .btn-action-warn:hover,
+.app-table .actions-cell .btn-action-success:hover,
+.app-table .actions-cell .btn-action-ver:hover,
+.app-table .actions-cell .btn-action-asignar:hover,
+.app-table .actions-cell .btn-action-editar:hover {
+  transform: scale(1.07);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+}
+.table td.acciones .btn-icon,
+.app-table td.acciones .btn-icon {
+  transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.15s ease;
+}
+.table td.acciones .btn-icon:hover,
+.app-table td.acciones .btn-icon:hover {
+  transform: scale(1.08);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.1);
 }
 
 /* Botones de modales: Guardar y Cancelar - mismo tamaño, centrados y uniformes */
@@ -258,8 +418,6 @@
   .table .actions-cell .btn-action-danger,
   .table .actions-cell .btn-action-warn,
   .table .actions-cell .btn-action-success {
-    margin-right: 0.25rem;
-    margin-bottom: 0.25rem;
     padding: 0.35rem 0.6rem;
     font-size: 0.8rem;
   }
@@ -443,8 +601,33 @@
   font-weight: 700;
 }
 
+.table tbody tr,
+.app-table tbody tr {
+  transition: var(--sipra-table-row-hover-transition);
+}
+.table tbody tr:hover,
 .app-table tbody tr:hover {
-  background: #f8fbff;
+  background: var(--sipra-table-row-hover);
+}
+/* Filas con color por vencimiento: el hover debe verse sin perder el matiz (evita que !important bloquee el resaltado) */
+.table tbody tr.vencimiento-vencida:hover,
+.app-table tbody tr.vencimiento-vencida:hover {
+  background: linear-gradient(rgba(226, 235, 248, 0.45), rgba(226, 235, 248, 0.45)), #fef2f2 !important;
+}
+.table tbody tr.vencimiento-proxima:hover,
+.app-table tbody tr.vencimiento-proxima:hover {
+  background: linear-gradient(rgba(226, 235, 248, 0.45), rgba(226, 235, 248, 0.45)), #fffbeb !important;
+}
+.table tbody tr.vencimiento-dentro-plazo:hover,
+.app-table tbody tr.vencimiento-dentro-plazo:hover {
+  background: linear-gradient(rgba(226, 235, 248, 0.45), rgba(226, 235, 248, 0.45)), #f0fdf4 !important;
+}
+/* Tablas embebidas (p. ej. dashboard en .table-shell) sin clase .table */
+.table-shell tbody tr {
+  transition: var(--sipra-table-row-hover-transition);
+}
+.table-shell tbody tr:hover {
+  background: var(--sipra-table-row-hover);
 }
 
 .status-chip {
@@ -558,7 +741,7 @@
 /* ========== RESPONSIVIDAD COMPLETA - SIP-AIF ========== */
 /* Breakpoints: 480px (móvil), 640px (móvil grande), 768px (tablet), 1024px (desktop) */
 
-/* Base: touch targets mínimos 44px para usabilidad móvil */
+/* Base: touch targets mínimos 44px para usabilidad móvil (excluye botones dentro de tablas) */
 @media (max-width: 768px) {
   .btn-primary,
   .btn-secondary,
@@ -570,8 +753,34 @@
   .modal-actions .btn-cancel { min-height: 44px; }
   .toolbar .btn-primary,
   .toolbar .btn-secondary { min-height: 44px !important; }
+  /* En tablas se mantienen compactos (evita que el bloque anterior los haga enormes) */
+  .table .actions-cell .btn-action,
+  .table .actions-cell .btn-action-danger,
+  .table .actions-cell .btn-action-warn,
+  .table .actions-cell .btn-action-success,
+  .app-table .actions-cell .btn-action,
+  .app-table .actions-cell .btn-action-danger,
+  .app-table .actions-cell .btn-action-warn,
+  .app-table .actions-cell .btn-action-success {
+    min-height: 1.75rem !important;
+    padding: 0.18rem 0.4rem !important;
+    font-size: 0.68rem !important;
+  }
+  .table .actions-cell .btn-action.btn-action-compact,
+  .table .actions-cell .btn-action-danger.btn-action-compact,
+  .app-table .actions-cell .btn-action.btn-action-compact,
+  .app-table .actions-cell .btn-action-danger.btn-action-compact {
+    min-height: 1.58rem !important;
+    padding: 0.14rem 0.34rem !important;
+    font-size: 0.64rem !important;
+  }
 }
 
+/*
+ * Tablas responsivas: envolver cada <table class="table"> (o .app-table) en
+ * .table-wrapper o .app-table-wrapper para permitir scroll horizontal en pantallas
+ * estrechas. El dashboard usa .table-shell con overflow-x propio.
+ */
 /* Tablas: scroll horizontal suave, min-width para legibilidad */
 .table-wrapper,
 .app-table-wrapper {

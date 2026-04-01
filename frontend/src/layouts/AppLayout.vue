@@ -115,12 +115,15 @@ async function doLogout() {
   router.push('/login')
 }
 
+/** Precarga el/los chunk(s) de la vista al pasar el mouse por el menú (navegación más inmediata al hacer clic) */
 function prefetchRoute(path: string) {
   try {
     const resolved = router.resolve(path)
-    const comp = resolved.matched[0]?.components?.default
-    if (typeof comp === 'function') {
-      ;(comp as () => Promise<unknown>)()
+    for (const record of resolved.matched) {
+      const comp = record.components?.default
+      if (typeof comp === 'function') {
+        void (comp as () => Promise<unknown>)()
+      }
     }
   } catch {
     /* ignorar */

@@ -5,6 +5,7 @@ Restablece la contraseña del usuario Administrador bootstrap.
 import os
 from django.core.management.base import BaseCommand
 from django.contrib.auth.hashers import make_password
+from areas.models import Area
 from users.models import Usuario, Rol
 
 
@@ -33,12 +34,14 @@ class Command(BaseCommand):
             if not admin_rol:
                 self.stdout.write(self.style.ERROR('No existe el rol Administrador. Ejecute: python manage.py crear_datos_iniciales'))
                 return
+            area_bootstrap = Area.objects.filter(estado=True).first()
             usuario = Usuario.objects.create(
                 nombre=os.environ.get('BOOTSTRAP_ADMIN_NOMBRE', 'Administrador').strip() or 'Administrador',
                 apellido=os.environ.get('BOOTSTRAP_ADMIN_APELLIDO', 'SIPRA').strip() or 'SIPRA',
                 email=email,
                 password=make_password(nueva_password),
                 rol=admin_rol,
+                area=area_bootstrap,
                 estado=True,
             )
             self.stdout.write(self.style.SUCCESS(f'Usuario administrador creado: {email}'))

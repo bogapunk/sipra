@@ -212,7 +212,7 @@ onMounted(load)
         <tr>
           <th>Código</th>
           <th>Nombre</th>
-          <th>Descripción</th>
+          <th class="col-descripcion">Descripción</th>
           <th>Estado</th>
           <th class="actions-header">Acciones</th>
         </tr>
@@ -228,15 +228,17 @@ onMounted(load)
             </span>
           </td>
           <td class="actions-cell">
-            <button class="btn-action" title="Ver" @click="openVer(s)"><IconEye class="btn-icon-sm" /> Ver</button>
-            <button class="btn-action" title="Ver proyectos" @click="verProyectos(s)">🔎 Ver proyectos</button>
+            <button type="button" class="btn-action btn-action-ver" title="Detalle de la secretaría" @click="openVer(s)"><IconEye class="btn-icon-sm" /> Detalle</button>
+            <button type="button" class="btn-action btn-action-asignar" title="Ir a proyectos filtrados por esta secretaría" @click="verProyectos(s)"><IconEye class="btn-icon-sm" /> Ver</button>
             <template v-if="isAdmin">
-              <button class="btn-action" title="Editar" @click="openEdit(s)"><IconEdit class="btn-icon-sm" /> Editar</button>
+              <button type="button" class="btn-action btn-action-editar" title="Editar" @click="openEdit(s)"><IconEdit class="btn-icon-sm" /> Editar</button>
               <button
+                type="button"
                 :class="['btn-action', s.activa !== false ? 'btn-action-warn' : 'btn-action-success']"
+                :title="s.activa !== false ? 'Desactivar' : 'Activar'"
                 @click="toggleActiva(s)"
               >
-                {{ s.activa !== false ? '🔄 Desactivar' : '🔄 Activar' }}
+                {{ s.activa !== false ? 'Desactivar' : 'Activar' }}
               </button>
             </template>
           </td>
@@ -333,9 +335,27 @@ onMounted(load)
   font-size: 0.9rem;
 }
 .toolbar-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.page .btn-action, .page .btn-action-warn, .page .btn-action-success { margin-right: 0.5rem; }
+.page .btn-action,
+.page .btn-action-warn,
+.page .btn-action-success { margin-right: 0.5rem; }
+.page .actions-cell .btn-action,
+.page .actions-cell .btn-action-warn,
+.page .actions-cell .btn-action-success { margin-right: 0; }
 .btn-action-warn { color: #b45309; }
 .btn-action-success { color: #15803d; }
+.app-table-wrapper th.col-descripcion,
+.app-table-wrapper td.col-descripcion {
+  max-width: 11rem;
+  width: 16%;
+  box-sizing: border-box;
+}
+.app-table-wrapper td.col-descripcion {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  vertical-align: middle;
+}
 .empty-msg { color: #64748b; margin-top: 0.5rem; }
 .modal-overlay {
   position: fixed;

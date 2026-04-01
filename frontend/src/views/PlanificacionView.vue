@@ -749,19 +749,21 @@ async function exportIndicadores() {
         </button>
         <button v-if="isAdmin" class="btn-primary" @click="openCreateEje"><IconPlus class="btn-icon" /> Nuevo eje</button>
       </div>
-      <table class="table">
-        <thead><tr><th>ID</th><th>Nombre</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
-        <tbody>
-          <tr v-for="e in ejesFiltrados" :key="(e.id_eje as number)">
-            <td>{{ e.id_eje }}</td>
-            <td>{{ e.nombre_eje }}</td>
-            <td v-if="isAdmin" class="actions-cell">
-              <button class="btn-action" @click="openEditEje(e)"><IconEdit class="btn-icon-sm" /> Editar</button>
-              <button class="btn-action-danger" @click="removeEje(e.id_eje as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead><tr><th>ID</th><th>Nombre</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
+          <tbody>
+            <tr v-for="e in ejesFiltrados" :key="(e.id_eje as number)">
+              <td>{{ e.id_eje }}</td>
+              <td>{{ e.nombre_eje }}</td>
+              <td v-if="isAdmin" class="actions-cell">
+                <button type="button" class="btn-action btn-action-editar" @click="openEditEje(e)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                <button class="btn-action-danger" @click="removeEje(e.id_eje as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="showFormEje" class="modal-overlay" @click.self="showFormEje = false">
         <div class="modal">
           <h2>{{ editingEjeId !== null ? 'Editar' : 'Nuevo' }} eje</h2>
@@ -790,20 +792,22 @@ async function exportIndicadores() {
         <button type="button" class="btn-secondary" @click="exportPlanes" :disabled="!planesFiltrados.length"><IconDownload class="btn-icon" /> Excel</button>
         <button v-if="isAdmin" class="btn-primary" @click="openCreatePlan"><IconPlus class="btn-icon" /> Nuevo plan</button>
       </div>
-      <table class="table">
-        <thead><tr><th>ID</th><th>Eje</th><th>Nombre</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
-        <tbody>
-          <tr v-for="p in planesFiltrados" :key="(p.id_plan as number)">
-            <td>{{ p.id_plan }}</td>
-            <td>{{ p.eje_nombre }}</td>
-            <td>{{ p.nombre_plan }}</td>
-            <td v-if="isAdmin" class="actions-cell">
-              <button class="btn-action" @click="openEditPlan(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
-              <button class="btn-action-danger" @click="removePlan(p.id_plan as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead><tr><th>ID</th><th>Eje</th><th>Nombre</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
+          <tbody>
+            <tr v-for="p in planesFiltrados" :key="(p.id_plan as number)">
+              <td>{{ p.id_plan }}</td>
+              <td>{{ p.eje_nombre }}</td>
+              <td>{{ p.nombre_plan }}</td>
+              <td v-if="isAdmin" class="actions-cell">
+                <button type="button" class="btn-action btn-action-editar" @click="openEditPlan(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                <button class="btn-action-danger" @click="removePlan(p.id_plan as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="showFormPlan" class="modal-overlay" @click.self="showFormPlan = false">
         <div class="modal modal-wide">
           <h2>{{ editingPlanId !== null ? 'Editar' : 'Nuevo' }} plan</h2>
@@ -841,20 +845,22 @@ async function exportIndicadores() {
         <button type="button" class="btn-secondary" @click="exportProgramas" :disabled="!programasFiltrados.length"><IconDownload class="btn-icon" /> Excel</button>
         <button v-if="isAdmin" class="btn-primary" @click="openCreateProg"><IconPlus class="btn-icon" /> Nuevo programa</button>
       </div>
-      <table class="table">
-        <thead><tr><th>Código</th><th>Plan</th><th>Nombre</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
-        <tbody>
-          <tr v-for="p in programasFiltrados" :key="(p.id_programa as string)">
-            <td>{{ p.id_programa }}</td>
-            <td>{{ p.plan_nombre }}</td>
-            <td>{{ p.nombre_programa }}</td>
-            <td v-if="isAdmin" class="actions-cell">
-              <button class="btn-action" @click="openEditProg(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
-              <button class="btn-action-danger" @click="removeProg(p.id_programa as string)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead><tr><th>Código</th><th>Plan</th><th>Nombre</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
+          <tbody>
+            <tr v-for="p in programasFiltrados" :key="(p.id_programa as string)">
+              <td>{{ p.id_programa }}</td>
+              <td>{{ p.plan_nombre }}</td>
+              <td>{{ p.nombre_programa }}</td>
+              <td v-if="isAdmin" class="actions-cell">
+                <button type="button" class="btn-action btn-action-editar" @click="openEditProg(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                <button type="button" class="btn-action-danger" @click="removeProg(p.id_programa as string)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="showFormProg" class="modal-overlay" @click.self="showFormProg = false">
         <div class="modal">
           <h2>{{ editingProgId !== null ? 'Editar' : 'Nuevo' }} programa</h2>
@@ -888,19 +894,21 @@ async function exportIndicadores() {
         <button type="button" class="btn-secondary" @click="exportObjetivos" :disabled="!objetivosFiltrados.length"><IconDownload class="btn-icon" /> Excel</button>
         <button v-if="isAdmin" class="btn-primary" @click="openCreateObj"><IconPlus class="btn-icon" /> Nuevo objetivo</button>
       </div>
-      <table class="table">
-        <thead><tr><th>Programa</th><th>Descripción</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
-        <tbody>
-          <tr v-for="o in objetivosFiltrados" :key="(o.id as number)">
-            <td>{{ o.programa_nombre }}</td>
-            <td class="desc-cell">{{ o.descripcion }}</td>
-            <td v-if="isAdmin" class="actions-cell">
-              <button class="btn-action" @click="openEditObj(o)"><IconEdit class="btn-icon-sm" /> Editar</button>
-              <button class="btn-action-danger" @click="removeObj(o.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead><tr><th>Programa</th><th>Descripción</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
+          <tbody>
+            <tr v-for="o in objetivosFiltrados" :key="(o.id as number)">
+              <td>{{ o.programa_nombre }}</td>
+              <td class="desc-cell">{{ o.descripcion }}</td>
+              <td v-if="isAdmin" class="actions-cell">
+                <button type="button" class="btn-action btn-action-editar" @click="openEditObj(o)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                <button class="btn-action-danger" @click="removeObj(o.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="showFormObj" class="modal-overlay" @click.self="showFormObj = false">
         <div class="modal modal-wide">
           <h2>{{ editingObjId !== null ? 'Editar' : 'Nuevo' }} objetivo</h2>
@@ -932,21 +940,23 @@ async function exportIndicadores() {
         <button type="button" class="btn-secondary" @click="exportIndicadores" :disabled="!indicadoresFiltrados.length"><IconDownload class="btn-icon" /> Excel</button>
         <button v-if="isAdmin" class="btn-primary" @click="openCreateInd"><IconPlus class="btn-icon" /> Nuevo indicador</button>
       </div>
-      <table class="table">
-        <thead><tr><th>Proyecto</th><th>Descripción</th><th>Unidad</th><th>Frecuencia</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
-        <tbody>
-          <tr v-for="i in indicadoresFiltrados" :key="(i.id as number)">
-            <td>{{ i.proyecto_nombre }}</td>
-            <td class="desc-cell">{{ i.descripcion }}</td>
-            <td>{{ i.unidad_medida || '-' }}</td>
-            <td>{{ i.frecuencia || '-' }}</td>
-            <td v-if="isAdmin" class="actions-cell">
-              <button class="btn-action" @click="openEditInd(i)"><IconEdit class="btn-icon-sm" /> Editar</button>
-              <button class="btn-action-danger" @click="removeInd(i.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead><tr><th>Proyecto</th><th>Descripción</th><th>Unidad</th><th>Frecuencia</th><th v-if="isAdmin" class="actions-header">Acciones</th></tr></thead>
+          <tbody>
+            <tr v-for="i in indicadoresFiltrados" :key="(i.id as number)">
+              <td>{{ i.proyecto_nombre }}</td>
+              <td class="desc-cell">{{ i.descripcion }}</td>
+              <td>{{ i.unidad_medida || '-' }}</td>
+              <td>{{ i.frecuencia || '-' }}</td>
+              <td v-if="isAdmin" class="actions-cell">
+                <button type="button" class="btn-action btn-action-editar" @click="openEditInd(i)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                <button class="btn-action-danger" @click="removeInd(i.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <div v-if="showFormInd" class="modal-overlay" @click.self="showFormInd = false">
         <div class="modal modal-wide">
           <h2>{{ editingIndId !== null ? 'Editar' : 'Nuevo' }} indicador</h2>

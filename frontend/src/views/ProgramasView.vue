@@ -123,27 +123,29 @@ onMounted(load)
       </div>
     </div>
 
-    <table class="table">
-      <thead>
-        <tr>
-          <th>Código</th>
-          <th>Plan</th>
-          <th>Nombre</th>
-          <th class="actions-header">Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="p in filtrados" :key="(p.id_programa as string)">
-          <td>{{ p.id_programa }}</td>
-          <td>{{ p.plan_nombre }}</td>
-          <td>{{ p.nombre_programa }}</td>
-          <td class="actions-cell">
-            <button class="btn-action" @click="openEdit(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
-            <button class="btn-action-danger" @click="remove(p.id_programa as string)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Plan</th>
+            <th>Nombre</th>
+            <th class="actions-header">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="p in filtrados" :key="(p.id_programa as string)">
+            <td>{{ p.id_programa }}</td>
+            <td>{{ p.plan_nombre }}</td>
+            <td>{{ p.nombre_programa }}</td>
+            <td class="actions-cell">
+              <button type="button" class="btn-action btn-action-editar" @click="openEdit(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
+              <button type="button" class="btn-action-danger" @click="remove(p.id_programa as string)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-if="showForm" class="modal-overlay" @click.self="showForm = false">
       <div class="modal">

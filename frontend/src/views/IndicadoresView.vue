@@ -141,29 +141,31 @@ onMounted(load)
       </div>
     </div>
 
-    <table class="table">
-      <thead>
-        <tr>
-          <th>Proyecto</th>
-          <th>Descripción</th>
-          <th>Unidad</th>
-          <th>Frecuencia</th>
-          <th class="actions-header">Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="i in filtrados" :key="(i.id as number)">
-          <td>{{ i.proyecto_nombre }}</td>
-          <td class="desc-cell">{{ i.descripcion }}</td>
-          <td>{{ i.unidad_medida || '-' }}</td>
-          <td>{{ i.frecuencia || '-' }}</td>
-          <td class="actions-cell">
-            <button class="btn-action" @click="openEdit(i)"><IconEdit class="btn-icon-sm" /> Editar</button>
-            <button class="btn-action-danger" @click="remove(i.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Proyecto</th>
+            <th>Descripción</th>
+            <th>Unidad</th>
+            <th>Frecuencia</th>
+            <th class="actions-header">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="i in filtrados" :key="(i.id as number)">
+            <td>{{ i.proyecto_nombre }}</td>
+            <td class="desc-cell">{{ i.descripcion }}</td>
+            <td>{{ i.unidad_medida || '-' }}</td>
+            <td>{{ i.frecuencia || '-' }}</td>
+            <td class="actions-cell">
+              <button type="button" class="btn-action btn-action-editar" @click="openEdit(i)"><IconEdit class="btn-icon-sm" /> Editar</button>
+              <button type="button" class="btn-action-danger" @click="remove(i.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-if="showForm" class="modal-overlay" @click.self="showForm = false">
       <div class="modal modal-wide">

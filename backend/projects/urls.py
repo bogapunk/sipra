@@ -6,7 +6,7 @@ from areas.views import AreaViewSet
 from secretarias.views import SecretariaViewSet
 from projects.views import (
     EjeViewSet, PlanViewSet, ProgramaViewSet, ObjetivoEstrategicoViewSet, IndicadorViewSet,
-    ProyectoViewSet, ProyectoAreaViewSet, ProyectoEquipoViewSet, EtapaViewSet,
+    ProyectoViewSet, ProyectoAreaViewSet, ProyectoSecretariaViewSet, ProyectoEquipoViewSet, EtapaViewSet,
     ComentarioProyectoViewSet, ComentarioAuditLogViewSet, AdjuntoAuditLogViewSet,
     AdjuntoProyectoViewSet,
 )
@@ -46,6 +46,7 @@ router.register("objetivos-estrategicos", ObjetivoEstrategicoViewSet)
 router.register("indicadores", IndicadorViewSet)
 router.register("proyectos", ProyectoViewSet)
 router.register("proyecto-area", ProyectoAreaViewSet)
+router.register("proyecto-secretaria", ProyectoSecretariaViewSet)
 router.register("proyecto-equipo", ProyectoEquipoViewSet)
 router.register("etapas", EtapaViewSet)
 router.register("comentarios-proyecto", ComentarioProyectoViewSet)

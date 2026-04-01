@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import { exportToCsv } from '@/utils/exportCsv'
 import IconDownload from '@/components/icons/IconDownload.vue'
@@ -18,22 +18,24 @@ import { invalidateApiCache } from '@/services/api'
 import { useModalClose } from '@/composables/useModalClose'
 import { estadoVencimiento, claseVencimiento } from '@/utils/vencimiento'
 import { extraerMensajeError } from '@/utils/apiError'
+import { formatFechaCorta } from '@/utils/fecha'
 import EmptyState from '@/components/EmptyState.vue'
+import { flattenTasksTree, fetchAllTareasProyecto } from '@/utils/taskTree'
 
 const route = useRoute()
+const router = useRouter()
 const { isVisualizador, user } = useAuth()
 const toast = useToast()
+const { confirmDelete } = useConfirmDelete()
 const proyectos = ref<Record<string, unknown>[]>([])
 const carga = ref(false)
 const showForm = ref(false)
 const editingId = ref<number | null>(null)
 const showAsignarModal = ref(false)
 const proyectoAsignar = ref<Record<string, unknown> | null>(null)
-const showVerModal = ref(false)
-const proyectoVer = ref<Record<string, unknown> | null>(null)
 const tipoAsignar = ref<'area' | 'secretaria'>('area')
 const areasSeleccionadasAsignar = ref<number[]>([])
-const secretariaSeleccionadaAsignar = ref<number | null>(null)
+const secretariasSeleccionadasAsignar = ref<number[]>([])
 const guardandoAsignar = ref(false)
 const buscarProyecto = ref('')
 const paginaActual = ref(1)
@@ -94,10 +96,10 @@ const form = ref({
   creado_por: 1,
   usuario_responsable: null as number | null,
   tipoDependencia: 'area' as TipoDependencia,
-  area_id: null as number | null,
-  secretaria: null as number | null,
+  areas_ids: [] as number[],
+  secretarias_ids: [] as number[],
   equipo: [] as number[],
-  presupuesto_items: [crearItemPresupuesto()] as PresupuestoItemForm[],
+  presupuesto_items: [] as PresupuestoItemForm[],
 })
 const usuarios = ref<Record<string, unknown>[]>([])
 const usuariosParaResponsable = ref<Record<string, unknown>[]>([])
@@ -108,9 +110,18 @@ const areas = ref<Record<string, unknown>[]>([])
 function parseProyectos(res: unknown): Record<string, unknown>[] {
   if (!res || typeof res !== 'object') return []
   const raw = (res as { data?: unknown }).data
-  if (Array.isArray(raw)) return raw as Record<string, unknown>[]
-  if (raw && typeof raw === 'object' && 'results' in (raw as object)) return ((raw as { results: unknown[] }).results || []) as Record<string, unknown>[]
-  return []
+  let lista: Record<string, unknown>[] = []
+  if (Array.isArray(raw)) lista = raw as Record<string, unknown>[]
+  else if (raw && typeof raw === 'object' && 'results' in (raw as object)) {
+    lista = ((raw as { results: unknown[] }).results || []) as Record<string, unknown>[]
+  }
+  const visto = new Set<number>()
+  return lista.filter((p) => {
+    const id = Number(p.id)
+    if (!Number.isFinite(id) || visto.has(id)) return false
+    visto.add(id)
+    return true
+  })
 }
 
 function parseCountFromResponse(res: unknown): number {
@@ -159,10 +170,6 @@ function agregarItemPresupuesto() {
 }
 
 function eliminarItemPresupuesto(index: number) {
-  if (form.value.presupuesto_items.length === 1) {
-    form.value.presupuesto_items = [crearItemPresupuesto()]
-    return
-  }
   form.value.presupuesto_items.splice(index, 1)
   reordenarPresupuesto()
 }
@@ -183,7 +190,7 @@ function onMontoItemInput(event: Event, item: PresupuestoItemForm, index: number
 }
 
 function mapPresupuestoItems(raw: unknown): PresupuestoItemForm[] {
-  if (!Array.isArray(raw) || !raw.length) return [crearItemPresupuesto()]
+  if (!Array.isArray(raw) || !raw.length) return []
   return raw.map((entry, index) => {
     const item = entry as Record<string, unknown>
     const mapped = crearItemPresupuesto({
@@ -199,35 +206,23 @@ function mapPresupuestoItems(raw: unknown): PresupuestoItemForm[] {
 }
 
 function buildPresupuestoPayload(): Record<string, unknown>[] | null {
-  if (!form.value.presupuesto_items.length) {
-    toast.error('Debe cargar al menos un item presupuestario.')
-    return null
-  }
-
-  const payload = form.value.presupuesto_items.map((item, index) => {
+  const payload: Record<string, unknown>[] = []
+  let orden = 0
+  for (let index = 0; index < form.value.presupuesto_items.length; index++) {
+    const item = form.value.presupuesto_items[index]
     aplicarReglasPresupuesto(item, index)
-
     const detalle = item.detalle.trim()
     const monto = Math.max(0, montoToNumber(item.monto))
-
-    return {
+    if (monto <= 0 && !detalle) {
+      continue
+    }
+    payload.push({
       id: item.id ?? undefined,
       categoria_gasto: item.categoria_gasto,
       monto,
       detalle,
-      orden: index,
-    }
-  })
-
-  const primerInvalido = payload.find((item) => {
-    const monto = Number(item.monto || 0)
-    if (monto <= 0 && !String(item.detalle || '').trim()) return true
-    return false
-  })
-
-  if (primerInvalido) {
-    toast.error('Cada gasto debe tener un monto o un detalle descriptivo.')
-    return null
+      orden: orden++,
+    })
   }
 
   const totalGastos = payload.reduce((acc, item) => acc + (Number(item.monto || 0) || 0), 0)
@@ -350,6 +345,61 @@ const filtroRutaTexto = computed(() => {
 
 const proyectosFiltrados = computed(() => proyectos.value)
 
+/** Si hay al menos un proyecto transversal en la página, se muestra columna y tabla expandible de tareas. */
+const hayTransversalEnLista = computed(() => proyectosFiltrados.value.some((p) => p.es_transversal))
+
+const expandedTransversal = ref<Record<number, boolean>>({})
+const tareasPorProyecto = ref<Record<number, Record<string, unknown>[]>>({})
+const cargandoTareasExpand = ref<Record<number, boolean>>({})
+/** Evita recargar al reexpandir si ya se obtuvo la lista (aunque esté vacía). */
+const tareasExpandYaPedidas = ref<Set<number>>(new Set())
+
+async function toggleExpandTransversal(id: number, ev: Event) {
+  ev.stopPropagation()
+  const abrir = !expandedTransversal.value[id]
+  expandedTransversal.value = { ...expandedTransversal.value, [id]: abrir }
+  if (abrir && !tareasExpandYaPedidas.value.has(id) && !cargandoTareasExpand.value[id]) {
+    cargandoTareasExpand.value = { ...cargandoTareasExpand.value, [id]: true }
+    try {
+      const list = await fetchAllTareasProyecto(id)
+      tareasPorProyecto.value = { ...tareasPorProyecto.value, [id]: list }
+      tareasExpandYaPedidas.value = new Set([...tareasExpandYaPedidas.value, id])
+    } catch {
+      toast.error('No se pudieron cargar las tareas del proyecto.')
+    } finally {
+      cargandoTareasExpand.value = { ...cargandoTareasExpand.value, [id]: false }
+    }
+  }
+}
+
+function filasTareasExpandidas(proyectoId: number) {
+  return flattenTasksTree(tareasPorProyecto.value[proyectoId] || [])
+}
+
+function irVerTareaDesdeProyectos(proyectoId: number, tareaId: number) {
+  router.push({ path: '/tareas', query: { proyecto: String(proyectoId), ver: String(tareaId) } })
+}
+
+function irEditarTareaDesdeProyectos(proyectoId: number, tareaId: number) {
+  router.push({ path: '/tareas', query: { proyecto: String(proyectoId), editar: String(tareaId) } })
+}
+
+async function eliminarTareaDesdeProyectos(proyectoId: number, tareaId: number) {
+  if (!(await confirmDelete())) return
+  try {
+    await api.delete(`tareas/${tareaId}/`)
+    invalidateApiCache('tareas')
+    toast.success('Tarea eliminada.')
+    const list = await fetchAllTareasProyecto(proyectoId)
+    tareasPorProyecto.value = { ...tareasPorProyecto.value, [proyectoId]: list }
+    tareasExpandYaPedidas.value = new Set([...tareasExpandYaPedidas.value, proyectoId])
+  } catch (e) {
+    toast.error(extraerMensajeError(e, 'No se pudo eliminar la tarea.'))
+  }
+}
+
+const colspanProyectoFila = computed(() => 8 + (hayTransversalEnLista.value ? 1 : 0))
+
 const resumenProyectos = computed(() => {
   const lista = proyectosFiltrados.value
   const total = totalProyectos.value
@@ -393,13 +443,18 @@ function dependenciaOrganizacional(p: Record<string, unknown>): { tipo: string; 
     const areasAsig = p.areas_asignadas as string[] | undefined
     if (areasAsig?.length) items.push({ tipo: 'Área', nombre: areasAsig.join(', ') })
   }
-  let secNombre = p.secretaria_nombre as string | undefined
-  if (!secNombre && p.secretaria != null) {
-    const secId = typeof p.secretaria === 'object' ? (p.secretaria as { id?: number }).id : p.secretaria
-    const s = secretarias.value.find((x: Record<string, unknown>) => (x.id as number) === Number(secId))
-    secNombre = s ? String(s.nombre || s.codigo || '') : undefined
+  const secsAsig = p.secretarias_asignadas as string[] | undefined
+  if (secsAsig?.length) {
+    items.push({ tipo: 'Secretaría', nombre: secsAsig.join(', ') })
+  } else {
+    let secNombre = p.secretaria_nombre as string | undefined
+    if (!secNombre && p.secretaria != null) {
+      const secId = typeof p.secretaria === 'object' ? (p.secretaria as { id?: number }).id : p.secretaria
+      const s = secretarias.value.find((x: Record<string, unknown>) => (x.id as number) === Number(secId))
+      secNombre = s ? String(s.nombre || s.codigo || '') : undefined
+    }
+    if (secNombre) items.push({ tipo: 'Secretaría', nombre: secNombre })
   }
-  if (secNombre) items.push({ tipo: 'Secretaría', nombre: secNombre })
   return items
 }
 
@@ -411,7 +466,7 @@ function presupuestoItemsProyecto(proyecto: Record<string, unknown> | null): Rec
 
 async function descargarExcel() {
   const lista = await fetchAllPages('dashboard/proyectos/', buildProjectParams(1))
-  const headers = ['Nombre', 'Dependencia organizacional', 'Avance %', 'Responsable', 'Estado', 'Fecha inicio', 'Fecha fin estimada', 'Descripción']
+  const headers = ['Nombre del proyecto', 'Dependencia organizacional', 'Avance %', 'Responsable', 'Estado', 'Fecha inicio', 'Fecha fin estimada', 'Descripción']
   const rows = lista.map((p: Record<string, unknown>) => {
     const deps = dependenciaOrganizacional(p)
     const depStr = deps.length ? deps.map(d => `${d.tipo}: ${d.nombre}`).join(' | ') : ''
@@ -421,8 +476,8 @@ async function descargarExcel() {
     String(p.porcentaje_avance ?? '0'),
     String(p.responsable_nombre || p.creado_por || ''),
     String(p.estado || ''),
-    String(p.fecha_inicio || ''),
-    String(p.fecha_fin_estimada || ''),
+    p.fecha_inicio ? formatFechaCorta(p.fecha_inicio as string) : '',
+    p.fecha_fin_estimada ? formatFechaCorta(p.fecha_fin_estimada as string) : '',
     String((p.descripcion || '').toString()),
   ]})
   await exportToCsv(headers, rows, `proyectos_${new Date().toISOString().slice(0, 10)}.xlsx`)
@@ -447,8 +502,8 @@ async function loadUsuariosParaResponsable() {
   cargaUsuariosResponsable.value = true
   try {
     const params: Record<string, number> = {}
-    if (form.value.tipoDependencia === 'area' && form.value.area_id) params.area = form.value.area_id
-    else if (form.value.tipoDependencia === 'secretaria' && form.value.secretaria) params.secretaria = form.value.secretaria
+    if (form.value.tipoDependencia === 'area' && form.value.areas_ids.length === 1) params.area = form.value.areas_ids[0]
+    else if (form.value.tipoDependencia === 'secretaria' && form.value.secretarias_ids.length === 1) params.secretaria = form.value.secretarias_ids[0]
     const res = await api.get('usuarios/selector/', { params })
     const lista = Array.isArray(res.data) ? res.data : []
     usuariosParaResponsable.value = lista
@@ -468,6 +523,7 @@ const openCreate = async () => {
   editingId.value = null
   if (!usuarios.value.length) await cargarUsuarios()
   const secretariaId = route.query.secretaria ? Number(route.query.secretaria) : null
+  const areaId = route.query.area ? Number(route.query.area) : null
   const tipoInicial: TipoDependencia = secretariaId ? 'secretaria' : 'area'
   form.value = {
     nombre: '',
@@ -480,10 +536,10 @@ const openCreate = async () => {
     creado_por: user.value?.id ?? 1,
     usuario_responsable: user.value?.id ?? null,
     tipoDependencia: tipoInicial,
-    area_id: null,
-    secretaria: tipoInicial === 'secretaria' ? secretariaId : null,
+    areas_ids: tipoInicial === 'area' && areaId ? [areaId] : [],
+    secretarias_ids: tipoInicial === 'secretaria' && secretariaId ? [secretariaId] : [],
     equipo: [],
-    presupuesto_items: [crearItemPresupuesto()],
+    presupuesto_items: [] as PresupuestoItemForm[],
   }
   showForm.value = true
   loadUsuariosParaResponsable()
@@ -503,23 +559,40 @@ const openEdit = async (p: Record<string, unknown>) => {
       ? (proyecto.area as { id?: number }).id
       : proyecto.area as number)
     : null
-  const areasProy = proyecto.areas_asignadas as string[] | undefined
-  let areaIdResolved: number | null = areaDirect != null ? Number(areaDirect) : null
-  if (!areaIdResolved && areasProy?.length && areas.value.length) {
-    const primerArea = areas.value.find((a: Record<string, unknown>) =>
-      areasProy.includes(String(a.nombre))
-    )
-    if (primerArea) areaIdResolved = primerArea.id as number
+  const areasIdsApi = proyecto.areas_asignadas_ids as number[] | undefined
+  let areasIdsResolved: number[] = Array.isArray(areasIdsApi) && areasIdsApi.length ? [...areasIdsApi] : []
+  if (!areasIdsResolved.length && areaDirect != null) {
+    areasIdsResolved = [Number(areaDirect)]
   }
-  if (!secId && !areaIdResolved) {
+  if (!areasIdsResolved.length) {
+    const areasProy = proyecto.areas_asignadas as string[] | undefined
+    if (areasProy?.length && areas.value.length) {
+      for (const nombre of areasProy) {
+        const match = areas.value.find((a: Record<string, unknown>) => String(a.nombre) === nombre)
+        if (match?.id) areasIdsResolved.push(match.id as number)
+      }
+    }
+  }
+  if (!areasIdsResolved.length) {
     try {
       const paRes = await api.get('proyecto-area/', { params: { proyecto: p.id } })
       const paList = paRes.data || []
-      const firstPa = paList[0] as Record<string, unknown> | undefined
-      if (firstPa) areaIdResolved = firstPa.area as number
+      areasIdsResolved = (paList as Record<string, unknown>[]).map((pa) => pa.area as number).filter(Boolean)
     } catch { /* ignorar */ }
   }
-  const tipo: TipoDependencia = secId ? 'secretaria' : 'area'
+  const secsIdsApi = proyecto.secretarias_asignadas_ids as number[] | undefined
+  let secretariasIdsResolved: number[] = Array.isArray(secsIdsApi) && secsIdsApi.length ? [...secsIdsApi] : []
+  if (!secretariasIdsResolved.length && secId != null) {
+    secretariasIdsResolved = [Number(secId)]
+  }
+  if (!secretariasIdsResolved.length && secId == null) {
+    try {
+      const psRes = await api.get('proyecto-secretaria/', { params: { proyecto: p.id } })
+      const psList = psRes.data || []
+      secretariasIdsResolved = (psList as Record<string, unknown>[]).map((row) => row.secretaria as number).filter(Boolean)
+    } catch { /* ignorar */ }
+  }
+  const tipo: TipoDependencia = areasIdsResolved.length > 0 ? 'area' : 'secretaria'
   let equipoIds: number[] = []
   try {
     const eqRes = await api.get('proyecto-equipo/', { params: { proyecto: p.id } })
@@ -539,11 +612,11 @@ const openEdit = async (p: Record<string, unknown>) => {
         ? (typeof proyecto.usuario_responsable === 'object'
           ? (proyecto.usuario_responsable as { id?: number }).id
           : proyecto.usuario_responsable)
-        : proyecto.creado_por
+        : null
     ) as number | null,
     tipoDependencia: tipo,
-    area_id: tipo === 'area' ? areaIdResolved : null,
-    secretaria: tipo === 'secretaria' ? secId : null,
+    areas_ids: tipo === 'area' ? areasIdsResolved : [],
+    secretarias_ids: tipo === 'secretaria' ? (secretariasIdsResolved.length ? secretariasIdsResolved : (secId ? [Number(secId)] : [])) : [],
     equipo: equipoIds,
     presupuesto_items: mapPresupuestoItems(proyecto.presupuesto_items),
   }
@@ -552,35 +625,28 @@ const openEdit = async (p: Record<string, unknown>) => {
 }
 
 const save = async () => {
-  const { tipoDependencia, area_id, equipo, usuario_responsable, presupuesto_items, ...rest } = form.value
-  if (tipoDependencia === 'area' && !area_id) {
-    toast.error('Seleccione un área para el proyecto.')
+  const { tipoDependencia, areas_ids, secretarias_ids, equipo, usuario_responsable, presupuesto_items, ...rest } = form.value
+  if (tipoDependencia === 'area' && !areas_ids.length) {
+    toast.error('Seleccione al menos un área para el proyecto.')
     return
   }
-  if (tipoDependencia === 'secretaria' && !form.value.secretaria) {
-    toast.error('Seleccione una secretaría para el proyecto.')
+  if (tipoDependencia === 'secretaria' && !secretarias_ids.length) {
+    toast.error('Seleccione al menos una secretaría para el proyecto.')
     return
-  }
-  if (!usuario_responsable) {
-    toast.error('Seleccione un Responsable Principal.')
-    return
-  }
-  if ((tipoDependencia === 'area' && area_id) || (tipoDependencia === 'secretaria' && form.value.secretaria)) {
-    if (!usuariosParaResponsable.value.length) {
-      toast.error('No hay usuarios cargados como responsables en esta ' + (tipoDependencia === 'area' ? 'área' : 'secretaría') + '. Debe registrar o asignar responsables primero.')
-      return
-    }
   }
   const presupuestoPayload = buildPresupuestoPayload()
   if (!presupuestoPayload) return
-  const payload = {
+  const payload: Record<string, unknown> = {
     ...rest,
     presupuesto_total: montoToNumber(form.value.presupuesto_total),
     usuario_responsable: usuario_responsable,
-    area: tipoDependencia === 'area' ? area_id : null,
-    secretaria: tipoDependencia === 'secretaria' ? form.value.secretaria : null,
     equipo: equipo || [],
     presupuesto_items: presupuestoPayload,
+  }
+  if (tipoDependencia === 'area') {
+    payload.areas_ids = areas_ids
+  } else {
+    payload.secretarias_ids = secretarias_ids
   }
   try {
     if (editingId.value) {
@@ -597,7 +663,6 @@ const save = async () => {
   }
 }
 
-const { confirmDelete } = useConfirmDelete()
 const remove = async (id: number) => {
   if (await confirmDelete()) {
     try {
@@ -608,7 +673,10 @@ const remove = async (id: number) => {
       load()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string }; status?: number } }
-      const msg = err.response?.data?.detail || err.response?.data?.error || (err.response?.status === 403 ? 'No tiene permiso para eliminar.' : 'Error al eliminar el proyecto.')
+      const msg = extraerMensajeError(
+        e,
+        err.response?.status === 403 ? 'No tiene permiso para eliminar.' : 'Error al eliminar el proyecto.',
+      )
       toast.error(msg)
     }
   }
@@ -621,33 +689,66 @@ const secretariasActivas = computed(() =>
   secretarias.value.filter((s: Record<string, unknown>) => s.activa !== false)
 )
 
-const openVer = async (p: Record<string, unknown>) => {
-  const detalleRes = await api.get(`proyectos/${p.id}/`).catch(() => ({ data: p }))
-  proyectoVer.value = { ...p, ...parseProyectoDetalle(detalleRes) }
-  showVerModal.value = true
+const avisoResponsableRecomendado = computed(() => {
+  const multiArea = form.value.tipoDependencia === 'area' && form.value.areas_ids.length > 1
+  const multiSec = form.value.tipoDependencia === 'secretaria' && form.value.secretarias_ids.length > 1
+  return !form.value.usuario_responsable || multiArea || multiSec
+})
+
+function toggleFormArea(id: number) {
+  const idx = form.value.areas_ids.indexOf(id)
+  if (idx >= 0) {
+    form.value.areas_ids = form.value.areas_ids.filter((x) => x !== id)
+  } else {
+    form.value.areas_ids = [...form.value.areas_ids, id]
+  }
 }
 
-const closeVerModal = () => {
-  showVerModal.value = false
-  proyectoVer.value = null
+function toggleFormSecretaria(id: number) {
+  const idx = form.value.secretarias_ids.indexOf(id)
+  if (idx >= 0) {
+    form.value.secretarias_ids = form.value.secretarias_ids.filter((x) => x !== id)
+  } else {
+    form.value.secretarias_ids = [...form.value.secretarias_ids, id]
+  }
+}
+
+function irADetalleProyecto(id: number) {
+  router.push(`/proyectos/${id}`)
+}
+
+function irAPanelVinculos(id: number) {
+  router.push(`/proyectos/${id}/vinculos`)
 }
 
 const openAsignar = async (p: Record<string, unknown>) => {
   proyectoAsignar.value = p
   const proyId = p.id as number
-  tipoAsignar.value = (p.secretaria != null && p.secretaria !== '') ? 'secretaria' : 'area'
   areasSeleccionadasAsignar.value = []
-  secretariaSeleccionadaAsignar.value = null
+  secretariasSeleccionadasAsignar.value = []
   try {
     const paRes = await api.get('proyecto-area/', { params: { proyecto: proyId } })
     const paList = paRes.data || []
     areasSeleccionadasAsignar.value = paList.map((pa: Record<string, unknown>) => pa.area as number)
+    const psRes = await api.get('proyecto-secretaria/', { params: { proyecto: proyId } })
+    const psList = psRes.data || []
+    secretariasSeleccionadasAsignar.value = (psList as Record<string, unknown>[]).map((row) => row.secretaria as number).filter(Boolean)
     const sec = p.secretaria
     const secId = sec != null && typeof sec === 'object' && !Array.isArray(sec) ? (sec as { id?: number }).id : sec
-    secretariaSeleccionadaAsignar.value = secId != null ? Number(secId) : null
+    if (secId != null && !secretariasSeleccionadasAsignar.value.includes(Number(secId))) {
+      secretariasSeleccionadasAsignar.value = [...secretariasSeleccionadasAsignar.value, Number(secId)]
+    }
+    if (areasSeleccionadasAsignar.value.length) {
+      tipoAsignar.value = 'area'
+    } else if (secretariasSeleccionadasAsignar.value.length || (p.secretaria != null && p.secretaria !== '')) {
+      tipoAsignar.value = 'secretaria'
+    } else {
+      tipoAsignar.value = 'area'
+    }
   } catch {
     areasSeleccionadasAsignar.value = []
-    secretariaSeleccionadaAsignar.value = null
+    secretariasSeleccionadasAsignar.value = []
+    tipoAsignar.value = (p.secretaria != null && p.secretaria !== '') ? 'secretaria' : 'area'
   }
   showAsignarModal.value = true
 }
@@ -656,10 +757,9 @@ const closeAsignarModal = () => {
   showAsignarModal.value = false
   proyectoAsignar.value = null
   areasSeleccionadasAsignar.value = []
-  secretariaSeleccionadaAsignar.value = null
+  secretariasSeleccionadasAsignar.value = []
 }
 const closeForm = () => { showForm.value = false }
-useModalClose(showVerModal, closeVerModal)
 useModalClose(showAsignarModal, closeAsignarModal)
 useModalClose(showForm, closeForm)
 
@@ -683,6 +783,15 @@ const toggleAreaAsignar = (id: number) => {
   }
 }
 
+const toggleSecretariaAsignar = (id: number) => {
+  const idx = secretariasSeleccionadasAsignar.value.indexOf(id)
+  if (idx >= 0) {
+    secretariasSeleccionadasAsignar.value = secretariasSeleccionadasAsignar.value.filter((x) => x !== id)
+  } else {
+    secretariasSeleccionadasAsignar.value = [...secretariasSeleccionadasAsignar.value, id]
+  }
+}
+
 const guardarAsignar = async () => {
   if (!proyectoAsignar.value || !user.value) return
   const proyId = proyectoAsignar.value.id as number
@@ -694,21 +803,22 @@ const guardarAsignar = async () => {
         guardandoAsignar.value = false
         return
       }
-      const areaId = areasSeleccionadasAsignar.value[0]
-      await api.patch(`proyectos/${proyId}/`, { area: areaId, secretaria: null })
-      const paActuales = (await api.get('proyecto-area/', { params: { proyecto: proyId } })).data || []
-      for (const pa of paActuales) {
-        await api.delete(`proyecto-area/${(pa as Record<string, unknown>).id}/`)
-      }
-      for (const aid of areasSeleccionadasAsignar.value) {
-        await api.post('proyecto-area/', { proyecto: proyId, area: aid })
-      }
+      await api.patch(`proyectos/${proyId}/`, {
+        area: null,
+        secretaria: null,
+        areas_ids: areasSeleccionadasAsignar.value,
+      })
     } else {
-      await api.patch(`proyectos/${proyId}/`, { area: null, secretaria: secretariaSeleccionadaAsignar.value })
-      const paActuales = (await api.get('proyecto-area/', { params: { proyecto: proyId } })).data || []
-      for (const pa of paActuales) {
-        await api.delete(`proyecto-area/${(pa as Record<string, unknown>).id}/`)
+      if (!secretariasSeleccionadasAsignar.value.length) {
+        toast.error('Seleccione al menos una secretaría.')
+        guardandoAsignar.value = false
+        return
       }
+      await api.patch(`proyectos/${proyId}/`, {
+        area: null,
+        secretaria: null,
+        secretarias_ids: secretariasSeleccionadasAsignar.value,
+      })
     }
     toast.success('Asignación guardada correctamente.')
     closeAsignarModal()
@@ -721,7 +831,7 @@ const guardarAsignar = async () => {
 }
 
 watch(
-  () => [form.value.area_id, form.value.secretaria, form.value.tipoDependencia],
+  () => [form.value.areas_ids, form.value.secretarias_ids, form.value.tipoDependencia],
   () => { if (showForm.value) loadUsuariosParaResponsable() },
   { deep: true }
 )
@@ -767,7 +877,7 @@ watch(buscarProyecto, () => {
       <input
         v-model="buscarProyecto"
         type="search"
-        placeholder="Buscar por nombre del proyecto..."
+        placeholder="Buscar (varias palabras: nombre, descripción, año, dependencia, responsable)..."
         class="search-input"
       />
       <div class="toolbar-buttons">
@@ -790,24 +900,47 @@ watch(buscarProyecto, () => {
 
     <LoaderSpinner v-if="carga" texto="Cargando proyectos..." />
 
-    <div v-else-if="proyectosFiltrados.length" class="table-wrapper">
+    <div v-else-if="proyectosFiltrados.length" class="table-wrapper proyectos-panel-table">
       <table class="table">
         <thead>
           <tr>
-            <th>Nombre</th>
-            <th>Dependencia organizacional</th>
-            <th>Avance</th>
+            <th v-if="hayTransversalEnLista" class="col-expand" title="Expandir tareas del proyecto transversal" />
+            <th class="col-nombre-proyecto" title="Nombre del proyecto">Proyecto</th>
+            <th class="col-dep" title="Dependencia organizacional">Dep. org.</th>
+            <th class="col-avance">Avance</th>
             <th>Responsable</th>
-            <th>Estado</th>
-            <th>Fecha inicio</th>
-            <th>Fecha fin</th>
-            <th class="actions-header">Acciones</th>
+            <th class="col-estado">Estado</th>
+            <th class="col-fecha-inicio" title="Fecha de inicio">Inicio</th>
+            <th class="col-fecha-fin" title="Fecha de finalización estimada">Fin</th>
+            <th class="actions-header col-acciones">Acciones</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="p in proyectosFiltrados" :key="(p.id as number)" :class="claseVencimiento(estadoVencimiento(p.fecha_fin_estimada, p.estado))">
-            <td>
-              <router-link :to="`/proyectos/${p.id}`">{{ p.nombre || '-' }}</router-link>
+          <template v-for="p in proyectosFiltrados" :key="(p.id as number)">
+          <tr
+            :class="claseVencimiento(estadoVencimiento(p.fecha_fin_estimada, p.estado))"
+            class="fila-clic-detalle"
+            role="button"
+            tabindex="0"
+            @click="irADetalleProyecto(p.id as number)"
+            @keydown.enter.prevent="irADetalleProyecto(p.id as number)"
+            @keydown.space.prevent="irADetalleProyecto(p.id as number)"
+          >
+            <td v-if="hayTransversalEnLista" class="col-expand" @click.stop>
+              <button
+                v-if="p.es_transversal"
+                type="button"
+                class="btn-expand-tareas"
+                :title="expandedTransversal[p.id as number] ? 'Ocultar tareas' : 'Ver tareas por dependencia'"
+                :aria-expanded="Boolean(expandedTransversal[p.id as number])"
+                @click="toggleExpandTransversal(p.id as number, $event)"
+              >
+                {{ expandedTransversal[p.id as number] ? '▼' : '▶' }}
+              </button>
+            </td>
+            <td class="col-nombre-proyecto">
+              <span v-if="p.es_transversal" class="badge-transversal" title="Varias áreas o secretarías">Transversal</span>
+              {{ p.nombre || '-' }}
             </td>
             <td class="dependencia-cell">
               <template v-if="dependenciaOrganizacional(p).length">
@@ -822,7 +955,7 @@ watch(buscarProyecto, () => {
               </template>
               <span v-else class="sin-dependencia">—</span>
             </td>
-            <td class="avance-cell">
+            <td class="avance-cell col-avance">
               <div class="progress-inline">
                 <div class="progress-track">
                   <div class="progress-fill" :style="{ width: `${Math.min(100, Number(p.porcentaje_avance) || 0)}%` }" />
@@ -831,25 +964,106 @@ watch(buscarProyecto, () => {
               </div>
             </td>
             <td>{{ p.responsable_nombre || p.creado_por || '-' }}</td>
-            <td>
+            <td class="col-estado">
               <span class="estado-chip" :class="estadoProyectoClase(p.estado)">{{ p.estado || '-' }}</span>
             </td>
-            <td>{{ p.fecha_inicio || '-' }}</td>
-            <td class="vencimiento-cell">
+            <td class="col-fecha-inicio">{{ formatFechaCorta(p.fecha_inicio as string | undefined) }}</td>
+            <td class="vencimiento-cell col-fecha-fin">
               <span v-if="p.fecha_fin_estimada" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(p.fecha_fin_estimada, p.estado)">
-                {{ p.fecha_fin_estimada }}
+                {{ formatFechaCorta(p.fecha_fin_estimada as string) }}
               </span>
               <span v-else class="vencimiento-sin">—</span>
             </td>
-            <td class="actions-cell">
-              <button class="btn-action" title="Ver" @click="openVer(p)"><IconEye class="btn-icon-sm" /> Ver</button>
+            <td class="actions-cell col-acciones" @click.stop>
+              <button type="button" class="btn-action btn-action-compact btn-action-ver" title="Ver detalle" @click="irADetalleProyecto(p.id as number)"><IconEye class="btn-icon-sm" /> Ver</button>
               <template v-if="!isVisualizador">
-                <button class="btn-action" title="Asignar" @click="openAsignar(p)"><IconPlus class="btn-icon-sm" /> Asignar</button>
-                <button class="btn-action" title="Editar" @click="openEdit(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
-                <button class="btn-action-danger" title="Eliminar" @click="remove(p.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+                <button
+                  v-if="p.es_transversal"
+                  type="button"
+                  class="btn-action btn-action-compact"
+                  title="Panel de vínculos y tareas por dependencia"
+                  @click.stop="irAPanelVinculos(p.id as number)"
+                >
+                  Vínculos
+                </button>
+                <button type="button" class="btn-action btn-action-compact btn-action-asignar" title="Asignar" @click="openAsignar(p)"><IconPlus class="btn-icon-sm" /> Asignar</button>
+                <button type="button" class="btn-action btn-action-compact btn-action-editar" title="Editar" @click="openEdit(p)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                <button
+                  type="button"
+                  class="btn-action-danger btn-action-compact"
+                  :disabled="Boolean(p.es_transversal)"
+                  :title="p.es_transversal ? 'Elimine o ajuste cada vínculo desde el panel de vínculos o el listado filtrado por área/secretaría.' : 'Eliminar proyecto'"
+                  @click="remove(p.id as number)"
+                >
+                  <IconTrash class="btn-icon-sm" /> Eliminar
+                </button>
               </template>
             </td>
           </tr>
+          <tr
+            v-if="hayTransversalEnLista && p.es_transversal && expandedTransversal[p.id as number]"
+            class="fila-tareas-transversal"
+          >
+            <td :colspan="colspanProyectoFila" class="celda-tareas-anidadas">
+              <LoaderSpinner v-if="cargandoTareasExpand[p.id as number]" texto="Cargando tareas..." />
+              <div v-else class="nested-tareas-wrap">
+                <p class="nested-tareas-titulo">Tareas del proyecto (por orden y dependencia)</p>
+                <div class="table-wrap-nested">
+                  <table class="table nested-tareas-table">
+                    <thead>
+                      <tr>
+                        <th class="nt-col-orden">Orden</th>
+                        <th class="nt-col-titulo">Título</th>
+                        <th class="nt-col-estado">Estado</th>
+                        <th class="nt-col-avance">Avance</th>
+                        <th class="nt-col-inicio">Inicio</th>
+                        <th class="nt-col-dep">Área / Secretaría</th>
+                        <th class="nt-col-venc">Vencimiento</th>
+                        <th v-if="!isVisualizador" class="nt-col-acc">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="{ t, depth } in filasTareasExpandidas(p.id as number)"
+                        :key="'nt-' + (t.id as number)"
+                        :class="[
+                          claseVencimiento(estadoVencimiento(t.fecha_vencimiento as string, t.estado as string)),
+                          depth > 0 ? 'nt-row-subtarea' : '',
+                        ]"
+                      >
+                        <td class="nt-col-orden">{{ t.orden ?? '—' }}</td>
+                        <td class="nt-col-titulo">
+                          <div
+                            class="nt-titulo-cell"
+                            :class="{ 'nt-titulo-es-sub': depth > 0 }"
+                            :style="{ paddingLeft: `${8 + depth * 14}px` }"
+                          >
+                            <span v-if="depth > 0" class="nt-subtarea-icon" aria-hidden="true">↳</span>
+                            <span v-if="depth > 0" class="badge-subtarea-nested">Subtarea</span>
+                            <span class="nt-titulo-texto">{{ t.titulo || '—' }}</span>
+                          </div>
+                        </td>
+                        <td class="nt-col-estado">{{ t.estado || '—' }}</td>
+                        <td class="nt-col-avance">{{ Number(t.porcentaje_avance) ?? 0 }}%</td>
+                        <td class="nt-col-inicio">{{ formatFechaCorta(t.fecha_inicio as string | undefined) }}</td>
+                        <td class="nt-col-dep">{{ t.organizacion_nombre || '—' }}</td>
+                        <td class="nt-col-venc">{{ formatFechaCorta(t.fecha_vencimiento as string | undefined) }}</td>
+                        <td v-if="!isVisualizador" class="nt-col-acc" @click.stop>
+                          <button type="button" class="btn-nested" title="Ver" @click="irVerTareaDesdeProyectos(p.id as number, t.id as number)"><IconEye class="btn-icon-sm" /></button>
+                          <button type="button" class="btn-nested" title="Editar" @click="irEditarTareaDesdeProyectos(p.id as number, t.id as number)"><IconEdit class="btn-icon-sm" /></button>
+                          <button type="button" class="btn-nested btn-nested-danger" title="Eliminar" @click="eliminarTareaDesdeProyectos(p.id as number, t.id as number)"><IconTrash class="btn-icon-sm" /></button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p v-if="!cargandoTareasExpand[p.id as number] && !filasTareasExpandidas(p.id as number).length" class="nested-sin-tareas">
+                  No hay tareas registradas para este proyecto.
+                </p>
+              </div>
+            </td>
+          </tr>
+          </template>
         </tbody>
       </table>
     </div>
@@ -898,7 +1112,7 @@ watch(buscarProyecto, () => {
             <div class="form-section-header">
               <div>
                 <h3>Matriz presupuestaria</h3>
-                <p class="hint">Defina el presupuesto total, la fuente y luego agregue los gastos asociados.</p>
+                <p class="hint">El presupuesto total y los ítems de gasto son opcionales. Puede guardar sin cargar gastos o usar «Agregar gasto» cuando los defina.</p>
               </div>
               <button type="button" class="btn-inline-add" @click="agregarItemPresupuesto">
                 Agregar gasto
@@ -983,53 +1197,83 @@ watch(buscarProyecto, () => {
           </section>
 
           <label>Dependencia organizacional</label>
+          <p class="hint">Puede marcar una o varias áreas o secretarías (proyectos transversales). No mezcle áreas y secretarías en el mismo proyecto.</p>
           <div class="tipo-dependencia-selector">
             <label class="tipo-opt">
-              <input type="radio" value="area" v-model="form.tipoDependencia" @change="form.secretaria = null" />
-              Área
+              <input type="radio" value="area" v-model="form.tipoDependencia" @change="form.secretarias_ids = []" />
+              Área(s)
             </label>
             <label class="tipo-opt">
-              <input type="radio" value="secretaria" v-model="form.tipoDependencia" @change="form.area_id = null" />
-              Secretaría
+              <input type="radio" value="secretaria" v-model="form.tipoDependencia" @change="form.areas_ids = []" />
+              Secretaría(s)
             </label>
           </div>
           <template v-if="form.tipoDependencia === 'area'">
-            <label>Seleccione el área</label>
-            <select v-model.number="form.area_id" :required="form.tipoDependencia === 'area'">
-              <option :value="null">— Seleccione un área —</option>
-              <option v-for="a in areas" :key="(a.id as number)" :value="a.id">
-                {{ a.nombre }}
-              </option>
-            </select>
+            <label>Seleccione una o más áreas</label>
+            <div class="areas-grid-asignar areas-grid-form">
+              <label
+                v-for="a in areasActivas"
+                :key="(a.id as number)"
+                class="area-check-asignar"
+                :class="{ checked: form.areas_ids.includes(a.id as number) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="form.areas_ids.includes(a.id as number)"
+                  @change="toggleFormArea(a.id as number)"
+                />
+                <span>{{ a.nombre }}</span>
+              </label>
+            </div>
           </template>
           <template v-else>
-            <label>Seleccione la secretaría</label>
-            <select v-model.number="form.secretaria">
-              <option :value="null">— Seleccione una secretaría —</option>
-              <option v-for="s in secretarias" :key="(s.id as number)" :value="s.id">
-                {{ s.codigo }} - {{ s.nombre }}
-              </option>
-            </select>
+            <label>Seleccione una o más secretarías</label>
+            <div class="areas-grid-asignar areas-grid-form">
+              <label
+                v-for="s in secretariasActivas"
+                :key="(s.id as number)"
+                class="area-check-asignar"
+                :class="{ checked: form.secretarias_ids.includes(s.id as number) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="form.secretarias_ids.includes(s.id as number)"
+                  @change="toggleFormSecretaria(s.id as number)"
+                />
+                <span>{{ s.codigo }} — {{ s.nombre }}</span>
+              </label>
+            </div>
           </template>
-          <label>Responsable Principal</label>
+          <label>Responsable principal (opcional)</label>
+          <p v-if="avisoResponsableRecomendado" class="hint-recomendacion">
+            <strong>Recomendación:</strong> conviene designar un responsable principal del proyecto. Si el alcance abarca varias áreas o secretarías, asigne responsables en cada dependencia para organizar tareas y seguimiento (puede hacerlo luego desde las tareas o el equipo).
+          </p>
           <template v-if="cargaUsuariosResponsable">
             <p class="mensaje-carga">Cargando usuarios...</p>
           </template>
-          <template v-else-if="(form.tipoDependencia === 'area' && form.area_id) || (form.tipoDependencia === 'secretaria' && form.secretaria)">
+          <template v-else-if="(form.tipoDependencia === 'area' && form.areas_ids.length === 1) || (form.tipoDependencia === 'secretaria' && form.secretarias_ids.length === 1)">
             <template v-if="!usuariosParaResponsable.length">
-              <p class="mensaje-sin-usuarios">No hay usuarios cargados como responsables en esta {{ form.tipoDependencia === 'area' ? 'área' : 'secretaría' }}.</p>
-              <p class="mensaje-sin-usuarios-hint">Debe registrar o asignar responsables a esa dependencia antes de continuar.</p>
+              <p class="mensaje-sin-usuarios">No hay usuarios en el selector para esta dependencia (solo administradores pueden listar el selector filtrado). Puede dejar el responsable vacío o elegir entre los usuarios cargados abajo si corresponde.</p>
             </template>
-            <select v-else v-model.number="form.usuario_responsable" required>
-              <option :value="null">— Seleccione responsable —</option>
+            <select v-else v-model.number="form.usuario_responsable">
+              <option :value="null">— Sin responsable asignado —</option>
               <option v-for="u in usuariosParaResponsable" :key="(u.id as number)" :value="u.id">
                 {{ u.nombre_completo || u.nombre }}
               </option>
             </select>
           </template>
-          <select v-else v-model.number="form.usuario_responsable" required>
-            <option :value="null">— Seleccione responsable —</option>
-            <option v-for="u in usuariosParaResponsable" :key="(u.id as number)" :value="u.id">
+          <template v-else-if="(form.tipoDependencia === 'area' && form.areas_ids.length > 1) || (form.tipoDependencia === 'secretaria' && form.secretarias_ids.length > 1)">
+            <select v-model.number="form.usuario_responsable">
+              <option :value="null">— Sin responsable asignado —</option>
+              <option v-for="u in usuarios" :key="(u.id as number)" :value="u.id">
+                {{ u.nombre_completo || u.nombre }}
+              </option>
+            </select>
+            <p class="hint">Con varias dependencias, el listado muestra todos los usuarios disponibles; elija quien coordina el proyecto a nivel global.</p>
+          </template>
+          <select v-else v-model.number="form.usuario_responsable">
+            <option :value="null">— Sin responsable asignado —</option>
+            <option v-for="u in usuarios" :key="(u.id as number)" :value="u.id">
               {{ u.nombre_completo || u.nombre }}
             </option>
           </select>
@@ -1052,97 +1296,6 @@ watch(buscarProyecto, () => {
             <button type="button" class="btn-cancel" @click="closeForm"><IconCancel class="btn-icon" /> Cancelar</button>
           </div>
         </form>
-      </div>
-    </div>
-
-    <!-- Modal Ver detalle proyecto -->
-    <div v-if="showVerModal && proyectoVer" class="modal-overlay" @click.self="closeVerModal">
-      <div class="modal modal-ver">
-        <h2>Detalle del proyecto</h2>
-        <div class="detalle-content">
-          <div class="detalle-row">
-            <span class="detalle-label">Nombre</span>
-            <span class="detalle-valor">{{ proyectoVer.nombre }}</span>
-          </div>
-          <div class="detalle-row" v-if="proyectoVer.descripcion">
-            <span class="detalle-label">Descripción</span>
-            <p class="detalle-valor detalle-desc">{{ proyectoVer.descripcion }}</p>
-          </div>
-          <div class="detalle-grid">
-            <div class="detalle-row">
-              <span class="detalle-label">Estado</span>
-              <span class="detalle-valor">{{ proyectoVer.estado }}</span>
-            </div>
-            <div class="detalle-row">
-              <span class="detalle-label">Avance</span>
-              <span class="detalle-valor">{{ Number(proyectoVer.porcentaje_avance) ?? 0 }}%</span>
-            </div>
-            <div class="detalle-row">
-              <span class="detalle-label">Responsable</span>
-              <span class="detalle-valor">{{ proyectoVer.responsable_nombre || proyectoVer.creado_por || '-' }}</span>
-            </div>
-            <div class="detalle-row">
-              <span class="detalle-label">Fecha inicio</span>
-              <span class="detalle-valor">{{ proyectoVer.fecha_inicio || '-' }}</span>
-            </div>
-            <div class="detalle-row">
-              <span class="detalle-label">Fecha fin estimada</span>
-              <span class="detalle-valor">{{ proyectoVer.fecha_fin_estimada || '-' }}</span>
-            </div>
-          </div>
-          <div class="detalle-row" v-if="dependenciaOrganizacional(proyectoVer).length">
-            <span class="detalle-label">Dependencia organizacional</span>
-            <div class="detalle-valor">
-              <span
-                v-for="(d, i) in dependenciaOrganizacional(proyectoVer)"
-                :key="i"
-                class="dependencia-badge"
-                :class="d.tipo === 'Secretaría' ? 'badge-secretaria' : 'badge-area'"
-              >
-                {{ d.tipo }}: {{ d.nombre }}
-              </span>
-            </div>
-          </div>
-          <div class="detalle-row">
-            <span class="detalle-label">Presupuesto</span>
-            <div class="detalle-presupuesto">
-              <div class="detalle-presupuesto-resumen">
-                <div class="detalle-row">
-                  <span class="detalle-label">Presupuesto total</span>
-                  <span class="detalle-valor">{{ formatCurrency(Number(proyectoVer.presupuesto_total) || 0) }}</span>
-                </div>
-                <div class="detalle-row">
-                  <span class="detalle-label">Fuente de financiamiento</span>
-                  <span class="detalle-valor">{{ proyectoVer.fuente_financiamiento || '-' }}</span>
-                </div>
-                <div class="detalle-row">
-                  <span class="detalle-label">Total cargado</span>
-                  <span class="detalle-valor">{{ formatCurrency(Number(proyectoVer.presupuesto_cargado) || 0) }}</span>
-                </div>
-              </div>
-              <div v-if="presupuestoItemsProyecto(proyectoVer).length" class="detalle-presupuesto-gastos">
-                <div
-                  v-for="(item, index) in presupuestoItemsProyecto(proyectoVer)"
-                  :key="item.id ?? `ver-presupuesto-${index}`"
-                  class="detalle-presupuesto-item"
-                >
-                  <div class="detalle-presupuesto-item-head">
-                    <strong>{{ item.categoria_gasto || `Gasto ${index + 1}` }}</strong>
-                    <span>{{ formatCurrency(Number(item.monto) || 0) }}</span>
-                  </div>
-                  <p class="detalle-presupuesto-texto">
-                    {{ item.detalle || 'Sin observaciones cargadas.' }}
-                  </p>
-                </div>
-              </div>
-              <p v-else class="detalle-presupuesto-vacio">No hay gastos presupuestarios cargados.</p>
-            </div>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <router-link v-if="proyectoVer.id" :to="`/proyectos/${proyectoVer.id}`" class="btn-primary">Ver proyecto completo</router-link>
-          <button type="button" class="btn-cancel" @click="closeVerModal"><IconCancel class="btn-icon" /> Cerrar</button>
-        </div>
       </div>
     </div>
 
@@ -1185,13 +1338,22 @@ watch(buscarProyecto, () => {
             </div>
           </template>
           <template v-else>
-            <label>Seleccione la secretaría</label>
-            <select v-model.number="secretariaSeleccionadaAsignar">
-              <option :value="null">— Sin secretaría —</option>
-              <option v-for="s in secretariasActivas" :key="(s.id as number)" :value="s.id">
-                {{ s.codigo }} - {{ s.nombre }}
-              </option>
-            </select>
+            <label>Seleccione las secretarías</label>
+            <div class="areas-grid-asignar">
+              <label
+                v-for="s in secretariasActivas"
+                :key="(s.id as number)"
+                class="area-check-asignar"
+                :class="{ checked: secretariasSeleccionadasAsignar.includes(s.id as number) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="secretariasSeleccionadasAsignar.includes(s.id as number)"
+                  @change="toggleSecretariaAsignar(s.id as number)"
+                />
+                <span>{{ s.codigo }} — {{ s.nombre }}</span>
+              </label>
+            </div>
           </template>
 
           <div class="modal-actions">
@@ -1308,7 +1470,9 @@ watch(buscarProyecto, () => {
   letter-spacing: 0.03em;
   color: #64748b;
 }
-.table tbody tr:hover { background: #f8fbff; }
+.proyectos-panel-table.table-wrapper tbody tr.fila-clic-detalle {
+  cursor: pointer;
+}
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
 .modal-overlay {
@@ -1441,6 +1605,20 @@ watch(buscarProyecto, () => {
 }
 .tipo-opt input { accent-color: #3b82f6; }
 .mensaje-carga { font-size: 0.9rem; color: #64748b; margin: 0.5rem 0; }
+.hint-recomendacion {
+  margin: 0.35rem 0 0.75rem;
+  padding: 0.65rem 0.8rem;
+  font-size: 0.88rem;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  line-height: 1.45;
+}
+.areas-grid-form {
+  max-height: 220px;
+  overflow-y: auto;
+}
 .mensaje-sin-usuarios { color: #b91c1c; font-weight: 600; margin: 0.5rem 0 0.25rem; }
 .mensaje-sin-usuarios-hint { font-size: 0.85rem; color: #64748b; margin: 0 0 0.5rem; }
 .hint { font-size: 0.85rem; color: #64748b; margin: 0; }
@@ -1471,16 +1649,75 @@ watch(buscarProyecto, () => {
   color: #0f172a;
   font-weight: 600;
 }
-.dependencia-cell { min-width: 180px; }
-.avance-cell { min-width: 190px; }
+.table-wrapper th.col-nombre-proyecto {
+  text-align: center !important;
+}
+.table-wrapper td.col-nombre-proyecto {
+  text-align: left;
+}
+.table-wrapper .col-dep {
+  width: 14%;
+  max-width: 11rem;
+}
+.dependencia-cell {
+  min-width: 0;
+  max-width: 11rem;
+}
+.table-wrapper th.col-avance,
+.table-wrapper td.avance-cell.col-avance {
+  text-align: center !important;
+}
+.avance-cell {
+  min-width: 6.5rem;
+  max-width: 8.5rem;
+}
+.table-wrapper .col-avance {
+  width: 9%;
+}
+.table-wrapper .progress-inline {
+  justify-content: center;
+  margin: 0 auto;
+  max-width: 7.5rem;
+}
+/* Evita solapamiento Fin / Acciones; Acciones centradas (coherente con el resto del sistema) */
+.table-wrapper.proyectos-panel-table .col-acciones {
+  min-width: 17.5rem;
+  width: auto;
+  max-width: none;
+  white-space: nowrap;
+}
+.table-wrapper.proyectos-panel-table th.col-fecha-inicio,
+.table-wrapper.proyectos-panel-table td.col-fecha-inicio {
+  min-width: 5.25rem;
+  max-width: 6.75rem;
+  text-align: center !important;
+}
+.table-wrapper.proyectos-panel-table th.col-fecha-fin,
+.table-wrapper.proyectos-panel-table td.vencimiento-cell.col-fecha-fin {
+  min-width: 6.5rem;
+  max-width: 8rem;
+  text-align: center !important;
+}
+.table-wrapper.proyectos-panel-table th.col-estado,
+.table-wrapper.proyectos-panel-table td.col-estado {
+  text-align: center !important;
+  vertical-align: middle;
+}
+.proyectos-panel-table.table-wrapper .table td.actions-cell {
+  display: table-cell !important;
+  vertical-align: middle !important;
+  text-align: center !important;
+  white-space: nowrap;
+}
 .progress-inline {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.4rem;
 }
 .progress-track {
   flex: 1;
-  height: 10px;
+  min-width: 0;
+  height: 8px;
   border-radius: 999px;
   background: #e2e8f0;
   overflow: hidden;
@@ -1491,19 +1728,143 @@ watch(buscarProyecto, () => {
   border-radius: 999px;
 }
 .progress-value {
-  min-width: 2.8rem;
-  font-weight: 700;
+  min-width: 2.35rem;
+  font-weight: 600;
   color: #0f172a;
+  font-size: 0.75rem;
+}
+.col-expand {
+  width: 2.25rem;
+  text-align: center;
+  vertical-align: middle;
+}
+.btn-expand-tareas {
+  border: none;
+  background: #f1f5f9;
+  border-radius: 6px;
+  width: 1.75rem;
+  height: 1.75rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: #334155;
+}
+.btn-expand-tareas:hover {
+  background: #e2e8f0;
+}
+.fila-tareas-transversal {
+  background: #fafafa;
+}
+.fila-tareas-transversal .celda-tareas-anidadas {
+  padding: 0.75rem 1rem 1rem;
+  vertical-align: top;
+}
+.nested-tareas-titulo {
+  margin: 0 0 0.5rem;
   font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+}
+.table-wrap-nested {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.nested-tareas-table {
+  font-size: 0.82rem;
+}
+.nested-tareas-table th,
+.nested-tareas-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.nested-tareas-table tr.nt-row-subtarea td {
+  background: rgba(248, 250, 252, 0.92);
+}
+.nested-tareas-table tr.nt-row-subtarea:hover td {
+  background: #f1f5f9;
+}
+.nt-titulo-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  line-height: 1.35;
+}
+.nt-titulo-es-sub .nt-titulo-texto {
+  font-weight: 500;
+  color: #334155;
+}
+.nt-subtarea-icon {
+  color: #64748b;
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.badge-subtarea-nested {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+  background: #e2e8f0;
+  padding: 0.12rem 0.4rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.nt-titulo-texto {
+  min-width: 0;
+  flex: 1 1 120px;
+}
+.nested-sin-tareas {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+.btn-nested {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  margin-right: 0.25rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.btn-nested-danger {
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+.badge-transversal {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 4px;
+  background: #e0e7ff;
+  color: #3730a3;
+  vertical-align: middle;
 }
 .dependencia-badge {
   display: inline-block;
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  margin-right: 0.35rem;
-  margin-bottom: 0.25rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  margin-right: 0.25rem;
+  margin-bottom: 0.15rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
 }
+/* Tamaño de botones Acciones: ver assets/styles.css (.table .actions-cell) */
 .dependencia-badge.badge-area {
   background: #e0f2fe;
   color: #0369a1;

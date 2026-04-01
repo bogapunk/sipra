@@ -623,11 +623,11 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['tecnología', 'stack', 'arquitectura', 'cómo está hecho', 'backend', 'frontend', 'django', 'vue'],
     respuesta: r(
       'Arquitectura del sistema SIP-AIF',
-      'SIP-AIF es un sistema full-stack: Backend en Django REST Framework (Python) con PostgreSQL. Frontend en Vue 3 + Vite + TypeScript. Autenticación JWT. API REST en /api/. El frontend usa proxy hacia el backend en desarrollo. Puerto backend: 8001, frontend: 5173.',
+      'SIP-AIF es un sistema full-stack: Backend en Django REST Framework (Python) con Microsoft SQL Server. Frontend en Vue 3 + Vite + TypeScript. Autenticación JWT. API REST en /api/. El frontend usa proxy hacia el backend en desarrollo. Puerto backend: 8001, frontend: 5173.',
       [
-        'Backend: Django 4.x, DRF, PostgreSQL, JWT.',
+        'Backend: Django 4.x, DRF, Microsoft SQL Server, JWT.',
         'Frontend: Vue 3, Vue Router, Axios, Vite.',
-        'Base de datos: PostgreSQL (obligatoria).',
+        'Base de datos: Microsoft SQL Server (obligatoria).',
       ],
       'URLs: Backend http://127.0.0.1:8001, Frontend http://localhost:5173',
       undefined
@@ -637,10 +637,10 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['ejecutar sistema', 'iniciar', 'levantar', 'arrancar', 'ejecutar-sistema-completo', 'bat'],
     respuesta: r(
       'Cómo ejecutar el sistema',
-      'Use el archivo ejecutar-sistema-completo.bat en la raíz del proyecto. Este script: 1) Verifica conexión a PostgreSQL y ejecuta migraciones. 2) Carga datos iniciales (roles, usuarios, áreas). 3) Inicia el backend en puerto 8001. 4) Inicia el frontend en puerto 5173. Requiere PostgreSQL corriendo con base "sipra".',
+      'Use el archivo ejecutar-sistema-completo.bat en la raíz del proyecto. Este script: 1) Verifica conexión a Microsoft SQL Server y ejecuta migraciones. 2) Carga datos iniciales (roles, usuarios, áreas). 3) Inicia el backend en puerto 8001. 4) Inicia el frontend en puerto 5173. Requiere Microsoft SQL Server accesible (base en .env, ej. Sipra-Test o Sipra).',
       [
-        'PostgreSQL debe estar activo en localhost:5432.',
-        'Base de datos: sipra. Usuario: postgres.',
+        'Microsoft SQL Server debe estar activo en localhost:5432.',
+        'Base de datos: sipra. Usuario: SQL Server.',
         'No cierre las ventanas de backend y frontend.',
       ],
       'Alternativa: diagnostico-db.bat para verificar la conexión a la BD.',
@@ -651,7 +651,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['credenciales', 'contraseña', 'usuario admin', 'login', 'iniciar sesión', 'acceso'],
     respuesta: r(
       'Credenciales de acceso',
-      'Usuarios por defecto: admin@admin.com / admin123, admin@sipra.local / AdminSipra2026!, bogarin1983@gmail.com / Sipra2026. Si no puede ingresar: verifique que el backend esté corriendo (puerto 8001), que PostgreSQL esté activo, y que use la URL correcta del frontend (localhost:5173).',
+      'Usuarios por defecto: admin@admin.com / admin123, admin@sipra.local / AdminSipra2026!, bogarin1983@gmail.com / Sipra2026. Si no puede ingresar: verifique que el backend esté corriendo (puerto 8001), que Microsoft SQL Server esté activo, y que use la URL correcta del frontend (localhost:5173).',
       [
         'Token inválido o expirado: cierre sesión, borre localStorage o use ventana de incógnito.',
         'Error de conexión: el backend no está corriendo o hay problema de red.',
@@ -677,9 +677,9 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['backup', 'respaldo', 'guardar copia', 'exportar datos'],
     respuesta: r(
       'Backup del sistema',
-      'En el módulo Backup y Restore (solo Administrador) puede crear backups de la base de datos PostgreSQL y del código. Hay dos tipos: backup de datos (pg_dump, archivo .sql) y backup de código (copia de archivos del proyecto). Los backups se listan con fecha y puede filtrar por rango de fechas o texto. Use "Crear backup" para generar una copia. Los backups permiten restaurar en caso de fallo.',
+      'En el módulo Backup y Restore (solo Administrador) puede crear backups de la base de datos Microsoft SQL Server y del código. Hay dos tipos: backup de datos (pg_dump, archivo .sql) y backup de código (copia de archivos del proyecto). Los backups se listan con fecha y puede filtrar por rango de fechas o texto. Use "Crear backup" para generar una copia. Los backups permiten restaurar en caso de fallo.',
       [
-        'Backup de datos: exporta la base PostgreSQL completa.',
+        'Backup de datos: exporta la base Microsoft SQL Server completa.',
         'Backup de código: copia los archivos del proyecto.',
         'Puede filtrar la lista por fecha y descargar backups previos.',
       ],
@@ -885,21 +885,21 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['producción', 'desplegar', 'deploy', 'poner en producción'],
     respuesta: r(
       'Despliegue en producción',
-      'Para producción: 1) Use Gunicorn u otro servidor WSGI (no runserver). 2) Configure variables de entorno: SECRET_KEY, ALLOWED_HOSTS, credenciales PostgreSQL. 3) Use HTTPS (Nginx/Caddy con Let\'s Encrypt). 4) No ponga credenciales en archivos .bat. 5) Consulte DEPLOY_DEMO.md para opciones (VPS, Render, Railway).',
+      'Para producción: 1) Use Gunicorn u otro servidor WSGI (no runserver). 2) Configure variables de entorno: SECRET_KEY, ALLOWED_HOSTS, credenciales Microsoft SQL Server. 3) Use HTTPS (Nginx/Caddy con Let\'s Encrypt). 4) No ponga credenciales en archivos .bat. 5) Consulte DEPLOY_DEMO.md para opciones (VPS, Render, Railway).',
       [
         'DEBUG=0 en producción.',
         'SECRET_KEY y ALLOWED_HOSTS obligatorios.',
-        'PostgreSQL en servidor dedicado o gestionado.',
+        'Microsoft SQL Server en servidor dedicado o gestionado.',
       ],
       undefined,
       undefined
     ),
   },
   {
-    keywords: ['variables entorno', 'configuración', 'env', 'postgres'],
+    keywords: ['variables entorno', 'configuración', 'env', 'SQL Server'],
     respuesta: r(
       'Variables de entorno',
-      'Variables clave: SECRET_KEY (obligatoria en prod), DEBUG (0 en prod), ALLOWED_HOSTS (dominios permitidos), POSTGRES_DB_HOST, POSTGRES_DB_PORT, POSTGRES_DB_NAME, POSTGRES_DB_USER, POSTGRES_DB_PASSWORD. Use archivo .env en la raíz (no subir al repositorio).',
+      'Variables clave: SECRET_KEY (obligatoria en prod), DEBUG (0 en prod), ALLOWED_HOSTS (dominios permitidos), DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, DB_TYPE=mssql. Use archivo .env en la raíz (no subir al repositorio).',
       undefined,
       undefined,
       undefined
@@ -919,7 +919,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['docker', 'contenedor', 'docker compose'],
     respuesta: r(
       'Ejecutar con Docker',
-      'Para producción con Docker: use docker compose up -d --build desde la raíz. Consulte DOCKER.md para la guía completa. El docker-compose.yml define PostgreSQL, backend y frontend. Variables de entorno: POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, DATABASE_URL, etc. Para desarrollo local use ejecutar-sistema-completo.bat.',
+      'Para producción con Docker: use docker compose up -d --build desde la raíz. Consulte DOCKER.md para la guía completa. El docker-compose.yml define backend y frontend; la base es SQL Server externa (DB_* en .env). Para desarrollo local use ejecutar-sistema-completo.bat.',
       [
         'Docker requiere Docker y Docker Compose instalados.',
         'docker-compose.produccion.yml para entorno de producción.',
@@ -945,9 +945,9 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['error', 'no funciona', 'falla', 'problema', 'no puedo'],
     respuesta: r(
       'Solución de problemas',
-      'Errores comunes: 1) No puedo ingresar: verifique backend en 8001, PostgreSQL activo, credenciales correctas. 2) Token expirado: cierre sesión, borre localStorage. 3) Error de conexión: backend no está corriendo. 4) Error de BD: ejecute diagnostico-db.bat. 5) Credenciales en .bat: use .env para no exponer contraseñas.',
+      'Errores comunes: 1) No puedo ingresar: verifique backend en 8001, Microsoft SQL Server activo, credenciales correctas. 2) Token expirado: cierre sesión, borre localStorage. 3) Error de conexión: backend no está corriendo. 4) Error de BD: ejecute diagnostico-db.bat. 5) Credenciales en .bat: use .env para no exponer contraseñas.',
       [
-        'diagnostico-db.bat: verifica conexión a PostgreSQL.',
+        'diagnostico-db.bat: verifica conexión a Microsoft SQL Server.',
         'restaurar-datos.bat: restaura datos iniciales.',
         'ejecutar-sistema-completo.bat: inicia todo el sistema.',
       ],

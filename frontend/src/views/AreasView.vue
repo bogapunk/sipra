@@ -189,9 +189,9 @@ onMounted(load)
             </span>
           </td>
           <td class="actions-cell">
-            <button class="btn-action" title="Ver" @click="openVer(a)"><IconEye class="btn-icon-sm" /> Ver</button>
-            <button class="btn-action" title="Editar" @click="openEdit(a)"><IconEdit class="btn-icon-sm" /> Editar</button>
-            <button class="btn-action-danger" title="Eliminar" @click="remove(a.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+            <button type="button" class="btn-action btn-action-ver" title="Ver" @click="openVer(a)"><IconEye class="btn-icon-sm" /> Ver</button>
+            <button type="button" class="btn-action btn-action-editar" title="Editar" @click="openEdit(a)"><IconEdit class="btn-icon-sm" /> Editar</button>
+            <button type="button" class="btn-action-danger" title="Eliminar" @click="remove(a.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
           </td>
         </tr>
       </tbody>

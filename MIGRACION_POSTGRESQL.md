@@ -1,6 +1,8 @@
 # Migración de SQLite a PostgreSQL
 
-Esta guía describe cómo migrar SIP-AIF de SQLite a PostgreSQL y qué cambios afectan al sistema.
+> **Obsoleto para el código actual:** SIP-AIF usa **solo Microsoft SQL Server 2022**. Este documento se conserva solo como referencia histórica.
+
+Esta guía describía cómo migrar SIP-AIF de SQLite a PostgreSQL y qué cambios afectan al sistema.
 
 ---
 

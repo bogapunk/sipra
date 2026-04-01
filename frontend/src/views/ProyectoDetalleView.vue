@@ -12,6 +12,7 @@ import PieChart from '@/components/PieChart.vue'
 import BarChart from '@/components/BarChart.vue'
 import { exportarProyectoDetalle } from '@/utils/exportProyectoDetalle'
 import { extraerMensajeError } from '@/utils/apiError'
+import { formatFechaCorta } from '@/utils/fecha'
 import LoaderSpinner from '@/components/LoaderSpinner.vue'
 import IconDownload from '@/components/icons/IconDownload.vue'
 import IconEdit from '@/components/icons/IconEdit.vue'
@@ -23,6 +24,8 @@ const toast = useToast()
 const { user, isAdmin, isVisualizador } = useAuth()
 const { confirmDelete } = useConfirmDelete()
 const proyecto = ref<Record<string, unknown> | null>(null)
+const areasCatalogo = ref<Record<string, unknown>[]>([])
+const secretariasCatalogo = ref<Record<string, unknown>[]>([])
 const carga = ref(true)
 const errorCarga = ref('')
 const tareas = ref<Record<string, unknown>[]>([])
@@ -67,18 +70,33 @@ function formatCurrency(value: unknown): string {
   return currencyFormatter.format(Number.isFinite(amount) ? amount : 0)
 }
 
+/** Área o secretaría asignada a la tarea (API: organizacion_nombre o nombres sueltos). */
+function dependenciaTarea(t: Record<string, unknown>): string {
+  const o = t.organizacion_nombre
+  if (typeof o === 'string' && o.trim()) return o.trim()
+  const an = t.area_nombre
+  const sn = t.secretaria_nombre
+  if (typeof an === 'string' && an.trim()) return `Área: ${an.trim()}`
+  if (typeof sn === 'string' && sn.trim()) return `Secretaría: ${sn.trim()}`
+  return '—'
+}
+
 const load = async () => {
   const id = proyectoId.value
   carga.value = true
   errorCarga.value = ''
   try {
-    const [proyRes, tareasRes, etapasRes, indRes, adjRes] = await Promise.all([
+    const [proyRes, tareasRes, etapasRes, indRes, adjRes, areasRes, secRes] = await Promise.all([
       getProyecto(id),
       getTareas({ proyecto: id, _ts: Date.now() }),
       api.get('etapas/', { params: { proyecto: id } }),
       api.get('indicadores/', { params: { proyecto: id } }),
       api.get('adjuntos-proyecto/', { params: { proyecto: id } }),
+      api.get('areas/').catch(() => ({ data: [] })),
+      api.get('secretarias/').catch(() => ({ data: [] })),
     ])
+    areasCatalogo.value = Array.isArray(areasRes.data) ? areasRes.data : []
+    secretariasCatalogo.value = Array.isArray(secRes.data) ? secRes.data : []
     proyecto.value = proyRes.data as Record<string, unknown>
     tareas.value = parseListResponse(tareasRes.data)
     etapas.value = parseListResponse(etapasRes.data)
@@ -281,6 +299,46 @@ const tareasPorVencimiento = computed(() => {
   return { vencidas, proximas, dentro }
 })
 
+const dependenciasListado = computed(() => {
+  const p = proyecto.value
+  if (!p) {
+    return { areas: [] as { id: number; nombre: string }[], secretarias: [] as { id: number; nombre: string }[] }
+  }
+  const areaIds = new Set<number>()
+  const idsRaw = p.areas_asignadas_ids
+  if (Array.isArray(idsRaw)) {
+    idsRaw.forEach((x) => {
+      const n = Number(x)
+      if (Number.isFinite(n)) areaIds.add(n)
+    })
+  }
+  const secIds = new Set<number>()
+  const secRaw = p.secretarias_asignadas_ids
+  if (Array.isArray(secRaw)) {
+    secRaw.forEach((x) => {
+      const n = Number(x)
+      if (Number.isFinite(n)) secIds.add(n)
+    })
+  }
+  const areas = [...areaIds].map((id) => {
+    const row = areasCatalogo.value.find((a) => Number(a.id) === id)
+    return { id, nombre: String(row?.nombre || `Área ${id}`) }
+  })
+  const secretarias = [...secIds].map((id) => {
+    const row = secretariasCatalogo.value.find((s) => Number(s.id) === id)
+    const codigo = row ? String(row.codigo || '').trim() : ''
+    const nombre = row ? String(row.nombre || '').trim() : ''
+    const label = codigo && nombre ? `${codigo} — ${nombre}` : (nombre || codigo || `Secretaría ${id}`)
+    return { id, nombre: label }
+  })
+  return { areas, secretarias }
+})
+
+const tieneDependenciasDetalle = computed(() => {
+  const d = dependenciasListado.value
+  return d.areas.length > 0 || d.secretarias.length > 0
+})
+
 const avanceGeneral = computed(() => Number(proyecto.value?.porcentaje_avance) || 0)
 const presupuestoItems = computed(() => {
   const items = proyecto.value?.presupuesto_items
@@ -426,6 +484,11 @@ watch(proyectoId, () => {
     </button>
   </div>
   <div v-else-if="proyecto" class="page">
+    <nav class="nav-volver" aria-label="Volver al listado">
+      <router-link to="/proyectos" class="btn-volver-proyectos">
+        ← Volver a Proyectos
+      </router-link>
+    </nav>
     <div class="header-row">
       <h1>{{ proyecto.nombre }}</h1>
       <div class="header-actions">
@@ -439,10 +502,40 @@ watch(proyectoId, () => {
         <router-link :to="`/proyectos/${proyectoId}/reasignar`" class="btn-reasignar">
           Reasignar Proyecto
         </router-link>
+        <router-link
+          v-if="proyecto.es_transversal"
+          :to="`/proyectos/${proyectoId}/vinculos`"
+          class="btn-reasignar"
+        >
+          Panel de vínculos
+        </router-link>
       </div>
     </div>
     <p class="desc">{{ proyecto.descripcion }}</p>
     <p><strong>Estado:</strong> {{ proyecto.estado }} | <strong>Avance general:</strong> {{ avanceGeneral.toFixed(2) }}%</p>
+
+    <section v-if="tieneDependenciasDetalle" class="section asignaciones-detalle-section">
+      <h2>Dependencias organizacionales</h2>
+      <p class="hint asignaciones-detalle-hint">
+        Listado de áreas y secretarías a las que está vinculado este proyecto (incluye alcance transversal con varias dependencias).
+      </p>
+      <div v-if="dependenciasListado.areas.length" class="asignaciones-detalle-bloque">
+        <h3>Áreas</h3>
+        <ul class="asignaciones-detalle-lista">
+          <li v-for="a in dependenciasListado.areas" :key="'area-' + a.id">
+            <span class="asignaciones-detalle-badge badge-area">{{ a.nombre }}</span>
+          </li>
+        </ul>
+      </div>
+      <div v-if="dependenciasListado.secretarias.length" class="asignaciones-detalle-bloque">
+        <h3>Secretarías</h3>
+        <ul class="asignaciones-detalle-lista">
+          <li v-for="s in dependenciasListado.secretarias" :key="'sec-' + s.id">
+            <span class="asignaciones-detalle-badge badge-secretaria">{{ s.nombre }}</span>
+          </li>
+        </ul>
+      </div>
+    </section>
 
     <section class="section presupuesto-section">
       <h2>Detalle presupuestario</h2>
@@ -591,14 +684,17 @@ watch(proyectoId, () => {
 
       <div v-if="tareasPorVencimiento.vencidas.length" class="tareas-grupo tareas-vencidas">
         <h3 class="grupo-titulo">Vencida</h3>
+        <div class="table-wrapper">
         <table class="table">
           <thead>
             <tr>
               <th class="col-orden">Orden</th>
               <th>Título</th>
               <th>Estado</th>
-              <th>Avance</th>
-              <th>Fecha de vencimiento</th>
+              <th class="col-avance">Avance</th>
+              <th class="col-fecha">Fecha de inicio</th>
+              <th class="col-organizacion">Área / Secretaría</th>
+              <th class="col-fecha">Fecha de vencimiento</th>
               <th class="col-acciones">Acciones</th>
               <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
@@ -616,14 +712,19 @@ watch(proyectoId, () => {
             >
               <td class="col-orden">{{ item.orden }}</td>
               <td :class="{ 'cell-indent': item.esSubtarea }">
-                <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
-                {{ item.tarea.titulo }}
+                <div class="detalle-titulo-tarea">
+                  <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
+                  <span v-if="item.esSubtarea" class="badge-subtarea-detalle">Subtarea</span>
+                  <span :class="{ 'titulo-con-sub': item.esSubtarea }">{{ item.tarea.titulo }}</span>
+                </div>
               </td>
               <td>{{ item.tarea.estado }}</td>
-              <td>{{ item.tarea.porcentaje_avance }}%</td>
+              <td class="col-avance">{{ item.tarea.porcentaje_avance }}%</td>
+              <td class="col-fecha">{{ formatFechaCorta(item.tarea.fecha_inicio as string | undefined) }}</td>
+              <td class="col-organizacion">{{ dependenciaTarea(item.tarea) }}</td>
               <td>
                 <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
-                  {{ item.tarea.fecha_vencimiento }}
+                  {{ formatFechaCorta(item.tarea.fecha_vencimiento as string | undefined) }}
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
@@ -636,18 +737,22 @@ watch(proyectoId, () => {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <div v-if="tareasPorVencimiento.proximas.length" class="tareas-grupo tareas-proximas">
         <h3 class="grupo-titulo">Próxima a vencer (7 días)</h3>
+        <div class="table-wrapper">
         <table class="table">
           <thead>
             <tr>
               <th class="col-orden">Orden</th>
               <th>Título</th>
               <th>Estado</th>
-              <th>Avance</th>
-              <th>Fecha de vencimiento</th>
+              <th class="col-avance">Avance</th>
+              <th class="col-fecha">Fecha de inicio</th>
+              <th class="col-organizacion">Área / Secretaría</th>
+              <th class="col-fecha">Fecha de vencimiento</th>
               <th class="col-acciones">Acciones</th>
               <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
@@ -665,14 +770,19 @@ watch(proyectoId, () => {
             >
               <td class="col-orden">{{ item.orden }}</td>
               <td :class="{ 'cell-indent': item.esSubtarea }">
-                <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
-                {{ item.tarea.titulo }}
+                <div class="detalle-titulo-tarea">
+                  <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
+                  <span v-if="item.esSubtarea" class="badge-subtarea-detalle">Subtarea</span>
+                  <span :class="{ 'titulo-con-sub': item.esSubtarea }">{{ item.tarea.titulo }}</span>
+                </div>
               </td>
               <td>{{ item.tarea.estado }}</td>
-              <td>{{ item.tarea.porcentaje_avance }}%</td>
+              <td class="col-avance">{{ item.tarea.porcentaje_avance }}%</td>
+              <td class="col-fecha">{{ formatFechaCorta(item.tarea.fecha_inicio as string | undefined) }}</td>
+              <td class="col-organizacion">{{ dependenciaTarea(item.tarea) }}</td>
               <td>
                 <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
-                  {{ item.tarea.fecha_vencimiento }}
+                  {{ formatFechaCorta(item.tarea.fecha_vencimiento as string | undefined) }}
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
@@ -685,18 +795,22 @@ watch(proyectoId, () => {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <div v-if="tareasPorVencimiento.dentro.length" class="tareas-grupo tareas-dentro">
         <h3 class="grupo-titulo">Dentro del plazo</h3>
+        <div class="table-wrapper">
         <table class="table">
           <thead>
             <tr>
               <th class="col-orden">Orden</th>
               <th>Título</th>
               <th>Estado</th>
-              <th>Avance</th>
-              <th>Fecha de vencimiento</th>
+              <th class="col-avance">Avance</th>
+              <th class="col-fecha">Fecha de inicio</th>
+              <th class="col-organizacion">Área / Secretaría</th>
+              <th class="col-fecha">Fecha de vencimiento</th>
               <th class="col-acciones">Acciones</th>
               <th v-if="modoOrden && !isVisualizador">Reordenar</th>
             </tr>
@@ -714,14 +828,19 @@ watch(proyectoId, () => {
             >
               <td class="col-orden">{{ item.orden }}</td>
               <td :class="{ 'cell-indent': item.esSubtarea }">
-                <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
-                {{ item.tarea.titulo }}
+                <div class="detalle-titulo-tarea">
+                  <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
+                  <span v-if="item.esSubtarea" class="badge-subtarea-detalle">Subtarea</span>
+                  <span :class="{ 'titulo-con-sub': item.esSubtarea }">{{ item.tarea.titulo }}</span>
+                </div>
               </td>
               <td>{{ item.tarea.estado }}</td>
-              <td>{{ item.tarea.porcentaje_avance }}%</td>
+              <td class="col-avance">{{ item.tarea.porcentaje_avance }}%</td>
+              <td class="col-fecha">{{ formatFechaCorta(item.tarea.fecha_inicio as string | undefined) }}</td>
+              <td class="col-organizacion">{{ dependenciaTarea(item.tarea) }}</td>
               <td>
                 <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
-                  {{ item.tarea.fecha_vencimiento }}
+                  {{ formatFechaCorta(item.tarea.fecha_vencimiento as string | undefined) }}
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
@@ -734,6 +853,7 @@ watch(proyectoId, () => {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <p v-if="!tareasParaTabla.length" class="hint">Sin tareas en este proyecto.</p>
@@ -742,6 +862,27 @@ watch(proyectoId, () => {
 </template>
 
 <style scoped>
+.nav-volver {
+  margin-bottom: 0.75rem;
+}
+.btn-volver-proyectos {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1e40af;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.btn-volver-proyectos:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
 .header-row {
   display: flex;
   justify-content: space-between;
@@ -793,6 +934,12 @@ watch(proyectoId, () => {
 .list li { padding: 0.25rem 0; }
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 0.5rem; text-align: left; }
+.table th.col-avance,
+.table td.col-avance { text-align: center; }
+.table th.col-fecha,
+.table td.col-fecha { white-space: nowrap; font-size: 0.9rem; }
+.table th.col-organizacion,
+.table td.col-organizacion { font-size: 0.88rem; max-width: 14rem; line-height: 1.35; }
 .section .btn-primary {
   padding: 0.5rem 1rem;
   background: #3b82f6;
@@ -849,7 +996,30 @@ watch(proyectoId, () => {
 .vencimiento-sin { color: #94a3b8; }
 .row-subtarea { background-color: rgba(248, 250, 252, 0.8); }
 .cell-indent { padding-left: 2rem !important; }
-.subtarea-icon { color: #64748b; margin-right: 0.35rem; font-size: 0.9rem; }
+.detalle-titulo-tarea {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  line-height: 1.35;
+}
+.subtarea-icon { color: #64748b; font-size: 0.95rem; flex-shrink: 0; }
+.badge-subtarea-detalle {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+  background: #e2e8f0;
+  padding: 0.12rem 0.4rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.titulo-con-sub {
+  font-weight: 500;
+  color: #334155;
+}
 .tareas-grupo { margin-bottom: 1.5rem; }
 .tareas-grupo:last-of-type { margin-bottom: 0; }
 .grupo-titulo {
@@ -935,6 +1105,48 @@ watch(proyectoId, () => {
 }
 .btn-actualizar:hover { background: #334155; }
 .btn-icon { width: 1rem; height: 1rem; }
+
+.asignaciones-detalle-section {
+  margin-top: 1.5rem;
+  padding: 1.1rem 1.2rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+.asignaciones-detalle-section h2 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+.asignaciones-detalle-hint { margin: 0 0 1rem; color: #64748b; font-size: 0.9rem; }
+.asignaciones-detalle-bloque { margin-bottom: 1rem; }
+.asignaciones-detalle-bloque:last-child { margin-bottom: 0; }
+.asignaciones-detalle-bloque h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #334155;
+}
+.asignaciones-detalle-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.asignaciones-detalle-badge {
+  display: inline-block;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.asignaciones-detalle-badge.badge-area {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+.asignaciones-detalle-badge.badge-secretaria {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #e9d5ff;
+}
 
 .presupuesto-section {
   margin-top: 1.5rem;

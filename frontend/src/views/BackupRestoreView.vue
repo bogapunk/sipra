@@ -273,7 +273,7 @@ function formatearTamano(bytes: number): string {
         <h2>Backup de base de datos</h2>
         <p class="section-desc">
           Genera una copia de seguridad de la base de datos actual.
-          En PostgreSQL el backup se guarda en formato `.sql`.
+          En Microsoft SQL Server el backup se guarda en formato `.sql` (carpeta `backups/sql/`).
         </p>
         <button
           type="button"

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { api } from '@/services/api'
+import { api, invalidateApiCache } from '@/services/api'
+import { formatFechaHora } from '@/utils/fecha'
+import { comentariosPorIdHistorial } from '@/utils/historialComentarios'
 import GraficoTorta from '@/components/GraficoTorta.vue'
 import GraficoBarrasTareas from '@/components/GraficoBarrasTareas.vue'
 import LoaderSpinner from '@/components/LoaderSpinner.vue'
@@ -16,6 +18,22 @@ const buscarSecretaria = ref('')
 const datos = ref<{ secretarias: { secretaria: string; tareas: Record<string, unknown>[] }[] }>({ secretarias: [] })
 const tareaSeleccionada = ref<Record<string, unknown> | null>(null)
 const historialTarea = ref<Record<string, unknown>[]>([])
+const comentariosTareaDetalle = ref<Record<string, unknown>[]>([])
+const comentariosPorHistorialMap = computed(() =>
+  comentariosPorIdHistorial(
+    historialTarea.value.map((h) => ({ id: Number(h.id), fecha: String(h.fecha || '') })),
+    comentariosTareaDetalle.value.map((c) => ({
+      ...c,
+      id: Number(c.id),
+      fecha: String(c.fecha || ''),
+    })) as Array<Record<string, unknown> & { id: number; fecha: string }>,
+  ),
+)
+function comentariosEnSegmento(hId: unknown): Record<string, unknown>[] {
+  const id = Number(hId)
+  if (!Number.isFinite(id)) return []
+  return comentariosPorHistorialMap.value.get(id) ?? []
+}
 
 onMounted(async () => {
   carga.value = true
@@ -56,16 +74,23 @@ function avanceClase(pct: number): string {
 async function abrirDetalleTarea(t: Record<string, unknown>) {
   tareaSeleccionada.value = t
   historialTarea.value = []
+  comentariosTareaDetalle.value = []
+  invalidateApiCache('historial')
   try {
-    const res = await api.get('historial/', { params: { tarea: t.id } })
-    const raw = Array.isArray(res.data) ? res.data : (res.data?.results || [])
+    const [histRes, comRes] = await Promise.all([
+      api.get('historial/', { params: { tarea: t.id } }),
+      api.get('comentarios-tarea/', { params: { tarea: t.id } }),
+    ])
+    const raw = Array.isArray(histRes.data) ? histRes.data : (histRes.data?.results || [])
     historialTarea.value = (raw as Record<string, unknown>[]).sort((a, b) => {
       const fa = (a.fecha as string) || ''
       const fb = (b.fecha as string) || ''
       return fb.localeCompare(fa)
     })
+    comentariosTareaDetalle.value = Array.isArray(comRes.data) ? comRes.data : (comRes.data?.results || [])
   } catch {
     historialTarea.value = []
+    comentariosTareaDetalle.value = []
   }
 }
 
@@ -241,9 +266,6 @@ async function exportarReporte() {
         >
           ✕
         </button>
-        <span v-if="buscarSecretaria && secretariasFiltradas.length >= 0" class="search-count">
-          {{ secretariasFiltradas.length }} secretaría(s) · {{ todasLasTareas.length }} tarea(s)
-        </span>
       </div>
       <button type="button" class="btn-exportar" @click="exportarReporte" :disabled="carga || !secretariasFiltradas.length">
         Exportar reporte
@@ -379,6 +401,9 @@ async function exportarReporte() {
         </div>
         <div v-if="historialTarea.length" class="detalle-historial">
           <h3>Historial de avances</h3>
+          <p class="historial-leyenda-detalle">
+            Incluye <strong>observaciones</strong> (al guardar el avance) y <strong>comentarios de la tarea</strong> del mismo período (entre este avance y el anterior).
+          </p>
           <div class="historial-lista">
             <div
               v-for="h in historialTarea"
@@ -389,10 +414,28 @@ async function exportarReporte() {
               <span v-if="Number(h.porcentaje_avance) === 100" class="historial-badge-cierre">
                 ✓ Tarea Finalizada
               </span>
-              <span class="historial-fecha">{{ formatearFecha(h.fecha) }}</span>
-              <span class="historial-avance">{{ h.porcentaje_avance }}%</span>
-              <span v-if="h.usuario_nombre" class="historial-usuario">{{ h.usuario_nombre }}</span>
-              <p v-if="h.comentario" class="historial-comentario">{{ h.comentario }}</p>
+              <div class="historial-item-meta">
+                <span class="historial-fecha">{{ formatFechaHora(h.fecha as string) }}</span>
+                <span v-if="h.usuario_nombre" class="historial-usuario">{{ h.usuario_nombre }}</span>
+                <span class="historial-valores">
+                  {{ h.porcentaje_anterior != null ? `${h.porcentaje_anterior}%` : '—' }} → {{ h.porcentaje_avance }}%
+                </span>
+              </div>
+              <div class="historial-observaciones">
+                <span class="historial-obs-label">Observaciones del avance</span>
+                <p v-if="String(h.comentario || '').trim()" class="historial-comentario-text">{{ String(h.comentario).trim() }}</p>
+                <p v-else class="historial-sin-obs">Sin observaciones en esta actualización.</p>
+              </div>
+              <div class="historial-comentarios-tarea">
+                <span class="historial-com-label">Comentarios de la tarea (período)</span>
+                <ul v-if="comentariosEnSegmento(h.id).length" class="historial-com-lista">
+                  <li v-for="c in comentariosEnSegmento(h.id)" :key="(c.id as number)" class="historial-com-item">
+                    <span class="historial-com-meta">{{ c.usuario_nombre || 'Usuario' }} · {{ formatFechaHora(c.fecha as string) }}</span>
+                    <p class="historial-com-texto">{{ c.texto }}</p>
+                  </li>
+                </ul>
+                <p v-else class="historial-sin-com">Sin comentarios de tarea en este período.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -536,11 +579,6 @@ async function exportarReporte() {
 .search-wrapper .search-clear:hover {
   background: #cbd5e1;
   color: #334155;
-}
-.search-wrapper .search-count {
-  font-size: 0.85rem;
-  color: #64748b;
-  margin-left: 0.25rem;
 }
 .cargando, .error-msg {
   text-align: center;
@@ -805,13 +843,99 @@ async function exportarReporte() {
 .detalle-avance { margin-bottom: 1rem; }
 .avance-valor-grande { font-size: 1.5rem; font-weight: 700; color: #3b82f6; display: block; margin-bottom: 0.5rem; }
 .detalle-historial h3 { font-size: 0.95rem; margin: 0 0 0.5rem; color: #334155; }
-.historial-lista { max-height: 180px; overflow-y: auto; background: #f8fafc; border-radius: 8px; padding: 0.5rem; }
-.historial-item { padding: 0.5rem 0.6rem; border-bottom: 1px solid #e2e8f0; font-size: 0.85rem; }
+.historial-leyenda-detalle { font-size: 0.72rem; color: #64748b; margin: 0 0 0.5rem; }
+.historial-lista { max-height: min(320px, 42vh); overflow-y: auto; background: #f8fafc; border-radius: 8px; padding: 0.5rem; border: 1px solid #e2e8f0; }
+.historial-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem 0.6rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+}
 .historial-item:last-child { border-bottom: none; }
+.historial-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+}
 .historial-fecha { color: #64748b; margin-right: 0.5rem; }
-.historial-avance { font-weight: 700; color: #3b82f6; margin-right: 0.5rem; }
+.historial-valores { font-weight: 700; color: #2563eb; }
 .historial-usuario { color: #475569; }
-.historial-comentario { margin: 0.25rem 0 0; font-size: 0.8rem; color: #64748b; font-style: italic; }
+.historial-observaciones {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #3b82f6;
+}
+.historial-obs-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+  margin-bottom: 0.35rem;
+}
+.historial-comentario-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #1e293b;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.historial-sin-obs {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+.historial-comentarios-tarea {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: #fafaf9;
+  border: 1px solid #e7e5e4;
+  border-left: 3px solid #78716c;
+}
+.historial-com-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #57534e;
+  margin-bottom: 0.4rem;
+}
+.historial-com-lista {
+  margin: 0;
+  padding-left: 1rem;
+  list-style: disc;
+}
+.historial-com-item { margin-bottom: 0.5rem; }
+.historial-com-item:last-child { margin-bottom: 0; }
+.historial-com-meta {
+  display: block;
+  font-size: 0.72rem;
+  color: #78716c;
+  margin-bottom: 0.2rem;
+}
+.historial-com-texto {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #292524;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.historial-sin-com {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #a8a29e;
+  font-style: italic;
+}
 .historial-item-cierre {
   background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
   border-left: 4px solid #16a34a;

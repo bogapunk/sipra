@@ -123,7 +123,7 @@ def _create_mssql_backup():
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
                 ORDER BY ORDINAL_POSITION
             """, [schema, table])
             col_names = [r[0] for r in cursor.fetchall()]

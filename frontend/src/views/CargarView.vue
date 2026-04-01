@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated } from 'vue'
+import { RouterLink } from 'vue-router'
 import { api } from '@/services/api'
 import { useAuth } from '@/composables/useAuth'
 import { useToast } from '@/composables/useToast'
@@ -103,11 +104,7 @@ const proyectosVisibles = computed(() => {
 })
 const tareaEdit = ref<Record<string, unknown> | null>(null)
 const historialTarea = ref<Record<string, unknown>[]>([])
-const comentariosTarea = ref<Record<string, unknown>[]>([])
 const adjuntosTarea = ref<Record<string, unknown>[]>([])
-const nuevoComentarioTarea = ref('')
-const comentarioEditando = ref<number | null>(null)
-const textoEditando = ref('')
 const archivoAdjunto = ref<HTMLInputElement | null>(null)
 const subiendoAdjunto = ref(false)
 const adjuntoEditando = ref<number | null>(null)
@@ -179,13 +176,10 @@ async function openModal(tarea: Record<string, unknown>) {
     comentario: '',
   }
   historialTarea.value = []
-  comentariosTarea.value = []
   adjuntosTarea.value = []
-  nuevoComentarioTarea.value = ''
   try {
-    const [histRes, comRes, adjRes] = await Promise.all([
+    const [histRes, adjRes] = await Promise.all([
       api.get('historial/', { params: { tarea: tarea.id } }),
-      api.get('comentarios-tarea/', { params: { tarea: tarea.id } }),
       api.get('adjuntos-tarea/', { params: { tarea: tarea.id } }),
     ])
     const raw = Array.isArray(histRes.data) ? histRes.data : (histRes.data?.results || [])
@@ -194,11 +188,9 @@ async function openModal(tarea: Record<string, unknown>) {
       const fb = (b.fecha as string) || ''
       return fb.localeCompare(fa)
     })
-    comentariosTarea.value = Array.isArray(comRes.data) ? comRes.data : (comRes.data?.results || [])
     adjuntosTarea.value = Array.isArray(adjRes.data) ? adjRes.data : (adjRes.data?.results || [])
   } catch {
     historialTarea.value = []
-    comentariosTarea.value = []
     adjuntosTarea.value = []
   }
   showModal.value = true
@@ -219,68 +211,10 @@ function formatearFecha(f: unknown): string {
 function closeModal() {
   showModal.value = false
   tareaEdit.value = null
-  comentarioEditando.value = null
-  textoEditando.value = ''
   adjuntoEditando.value = null
   nombreAdjuntoEditando.value = ''
 }
 useModalClose(showModal, closeModal)
-
-async function guardarComentarioTarea() {
-  const t = tareaEdit.value
-  if (!t || !user.value || !nuevoComentarioTarea.value.trim()) return
-  try {
-    await api.post('comentarios-tarea/', {
-      tarea: t.id,
-      texto: nuevoComentarioTarea.value.trim(),
-    })
-    nuevoComentarioTarea.value = ''
-    const res = await api.get('comentarios-tarea/', { params: { tarea: t.id } })
-    comentariosTarea.value = Array.isArray(res.data) ? res.data : (res.data?.results || [])
-    toast.success('Comentario guardado.')
-  } catch (e) {
-    toast.error(extraerMensajeError(e, 'Error al guardar el comentario.'))
-  }
-}
-
-function iniciarEdicionComentario(c: Record<string, unknown>) {
-  comentarioEditando.value = c.id as number
-  textoEditando.value = (c.texto as string) || ''
-}
-
-function cancelarEdicionComentario() {
-  comentarioEditando.value = null
-  textoEditando.value = ''
-}
-
-async function guardarEdicionComentarioTarea() {
-  const t = tareaEdit.value
-  const id = comentarioEditando.value
-  if (!t || !id || !textoEditando.value.trim()) return
-  try {
-    await api.patch(`comentarios-tarea/${id}/`, { texto: textoEditando.value.trim() })
-    const res = await api.get('comentarios-tarea/', { params: { tarea: t.id } })
-    comentariosTarea.value = Array.isArray(res.data) ? res.data : (res.data?.results || [])
-    comentarioEditando.value = null
-    textoEditando.value = ''
-    toast.success('Comentario actualizado.')
-  } catch (e) {
-    toast.error(extraerMensajeError(e, 'Error al actualizar el comentario.'))
-  }
-}
-
-async function eliminarComentarioTarea(c: Record<string, unknown>) {
-  const t = tareaEdit.value
-  if (!t || !(await confirmDelete())) return
-  try {
-    await api.delete(`comentarios-tarea/${c.id}/`)
-    const res = await api.get('comentarios-tarea/', { params: { tarea: t.id } })
-    comentariosTarea.value = Array.isArray(res.data) ? res.data : (res.data?.results || [])
-    toast.success('Comentario eliminado.')
-  } catch (e) {
-    toast.error(extraerMensajeError(e, 'Error al eliminar el comentario.'))
-  }
-}
 
 function iniciarEdicionAdjunto(a: Record<string, unknown>) {
   adjuntoEditando.value = a.id as number
@@ -479,61 +413,55 @@ async function saveAvance() {
         <h2>Actualizar avance</h2>
         <p v-if="tareaEdit" class="modal-subtitle">{{ tareaEdit.titulo }}</p>
 
-        <div v-if="historialTarea.length" class="historial-section">
+        <form class="form-avance-principal" @submit.prevent="saveAvance">
+          <label for="carga-pct">Porcentaje de avance (0-100)</label>
+          <input id="carga-pct" v-model.number="formAvance.porcentaje_avance" type="number" min="0" max="100" required />
+          <label for="carga-nota">Nota (opcional)</label>
+          <textarea
+            id="carga-nota"
+            v-model="formAvance.comentario"
+            placeholder="Detalle breve de lo realizado en esta actualización (se guarda con el mismo botón Guardar)."
+            rows="3"
+          />
+          <p class="carga-hint-tareas">
+            El hilo de comentarios de la tarea (ediciones) está en
+            <RouterLink to="/tareas" class="link-tareas">Tareas</RouterLink>
+            si su rol tiene acceso.
+          </p>
+          <div class="modal-actions">
+            <button type="submit" class="btn-primary"><IconSave class="btn-icon" /> Guardar</button>
+            <button type="button" class="btn-cancel" @click="closeModal"><IconCancel class="btn-icon" /> Cancelar</button>
+          </div>
+        </form>
+
+        <div class="historial-section">
           <h3>Historial de cambios</h3>
-          <p class="historial-leyenda">Fecha · Usuario · Valor anterior → Nuevo valor · Observaciones</p>
-          <div class="historial-lista">
+          <p class="historial-leyenda">Registros de cada actualización: %, autor y nota asociada.</p>
+          <div v-if="historialTarea.length" class="historial-lista">
             <div
               v-for="h in historialTarea"
               :key="(h.id as number)"
-              class="historial-item"
+              class="historial-item historial-item-avance"
               :class="{ 'historial-item-cierre': Number(h.porcentaje_avance) === 100 }"
             >
               <span v-if="Number(h.porcentaje_avance) === 100" class="historial-badge-cierre">
                 ✓ Tarea Finalizada
               </span>
-              <span class="historial-fecha">{{ formatearFecha(h.fecha) }}</span>
-              <span v-if="h.usuario_nombre" class="historial-usuario">{{ h.usuario_nombre }}</span>
-              <span class="historial-valores">
-                {{ h.porcentaje_anterior != null ? `${h.porcentaje_anterior}%` : '-' }} → {{ h.porcentaje_avance }}%
-              </span>
-              <p v-if="h.comentario" class="historial-comentario">{{ h.comentario }}</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="historial-section">
-          <h3>Historial de comentarios</h3>
-          <p v-if="comentariosTarea.length" class="historial-leyenda">Orden cronológico (del más antiguo al más reciente)</p>
-          <div v-if="comentariosTarea.length" class="historial-lista">
-            <div v-for="c in comentariosTarea" :key="(c.id as number)" class="historial-item historial-item-comentario">
-              <div class="comentario-header">
-                <span class="historial-fecha">{{ formatearFecha(c.fecha) }}</span>
-                <span v-if="c.usuario_nombre" class="historial-usuario">{{ c.usuario_nombre }}</span>
-                <span v-if="c.editado_leyenda" class="editado-leyenda">{{ c.editado_leyenda }}</span>
-                <div v-if="puedeEditarEliminarComentario(c)" class="comentario-acciones">
-                  <button v-if="comentarioEditando !== c.id" type="button" class="btn-icon-mini" title="Editar" @click="iniciarEdicionComentario(c)">
-                    <IconEdit class="btn-icon-sm" />
-                  </button>
-                  <button v-if="comentarioEditando !== c.id" type="button" class="btn-icon-mini btn-danger-mini" title="Eliminar" @click="eliminarComentarioTarea(c)">
-                    <IconTrash class="btn-icon-sm" />
-                  </button>
-                </div>
+              <div class="historial-item-meta">
+                <span class="historial-fecha">{{ formatearFecha(h.fecha) }}</span>
+                <span v-if="h.usuario_nombre" class="historial-usuario">{{ h.usuario_nombre }}</span>
+                <span class="historial-valores">
+                  {{ h.porcentaje_anterior != null ? `${h.porcentaje_anterior}%` : '-' }} → {{ h.porcentaje_avance }}%
+                </span>
               </div>
-              <template v-if="comentarioEditando === c.id">
-                <textarea v-model="textoEditando" rows="2" class="edit-textarea" />
-                <div class="edit-acciones">
-                  <button type="button" class="btn-small" @click="guardarEdicionComentarioTarea">Guardar</button>
-                  <button type="button" class="btn-small btn-cancel-mini" @click="cancelarEdicionComentario">Cancelar</button>
-                </div>
-              </template>
-              <p v-else class="historial-comentario">{{ c.texto }}</p>
+              <div class="historial-observaciones">
+                <span class="historial-obs-label">Nota</span>
+                <p v-if="String(h.comentario || '').trim()" class="historial-comentario-text">{{ String(h.comentario).trim() }}</p>
+                <p v-else class="historial-sin-obs">Sin nota en esta actualización.</p>
+              </div>
             </div>
           </div>
-          <div class="comentario-add">
-            <textarea v-model="nuevoComentarioTarea" placeholder="Agregar comentario..." rows="2" />
-            <button type="button" class="btn-small" @click="guardarComentarioTarea" :disabled="!nuevoComentarioTarea.trim()">Enviar</button>
-          </div>
+          <p v-else class="historial-vacio">Aún no hay registros de avance.</p>
         </div>
 
         <div class="historial-section">
@@ -562,17 +490,6 @@ async function saveAvance() {
             <span v-if="subiendoAdjunto" class="adjunto-loading">Subiendo...</span>
           </div>
         </div>
-
-        <form @submit.prevent="saveAvance">
-          <label>Porcentaje de avance (0-100)</label>
-          <input v-model.number="formAvance.porcentaje_avance" type="number" min="0" max="100" required />
-          <label>Comentario (opcional)</label>
-          <textarea v-model="formAvance.comentario" placeholder="Agregar comentario si lo desea" rows="3" />
-          <div class="modal-actions">
-            <button type="submit" class="btn-primary"><IconSave class="btn-icon" /> Guardar</button>
-            <button type="button" class="btn-cancel" @click="closeModal"><IconCancel class="btn-icon" /> Cancelar</button>
-          </div>
-        </form>
       </div>
     </div>
   </div>
@@ -765,7 +682,28 @@ async function saveAvance() {
 }
 .modal h2 { margin-bottom: 0.5rem; }
 .modal-subtitle { font-size: 0.9rem; color: #64748b; margin-bottom: 1rem; }
-.modal form { display: flex; flex-direction: column; gap: 0.5rem; }
+.form-avance-principal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+.carga-hint-tareas {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.45;
+}
+.link-tareas { color: #2563eb; font-weight: 600; text-decoration: none; }
+.link-tareas:hover { text-decoration: underline; }
+.historial-vacio {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  font-style: italic;
+  margin: 0;
+}
 .modal input, .modal select, .modal textarea {
   padding: 0.5rem;
   border: 1px solid #e2e8f0;
@@ -783,7 +721,7 @@ async function saveAvance() {
   color: #334155;
 }
 .historial-lista {
-  max-height: 140px;
+  max-height: min(220px, 38vh);
   overflow-y: auto;
   background: #f8fafc;
   border-radius: 8px;
@@ -796,20 +734,53 @@ async function saveAvance() {
 }
 .historial-item:last-child { border-bottom: none; }
 .historial-leyenda { font-size: 0.75rem; color: #94a3b8; margin: 0 0 0.5rem; }
-.historial-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem; }
+.historial-item-avance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.historial-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+}
 .historial-fecha { color: #64748b; }
 .historial-usuario { color: #475569; font-weight: 500; }
 .historial-valores { font-weight: 700; color: #3b82f6; }
-.historial-comentario { margin: 0.25rem 0 0; font-size: 0.8rem; color: #64748b; font-style: italic; }
-.historial-item-comentario { flex-direction: column; align-items: stretch; }
-.comentario-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
-.editado-leyenda { font-size: 0.7rem; color: #94a3b8; font-style: italic; }
-.comentario-acciones { margin-left: auto; display: flex; gap: 0.25rem; }
+.historial-observaciones {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #3b82f6;
+}
+.historial-obs-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+  margin-bottom: 0.35rem;
+}
+.historial-comentario-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #1e293b;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.historial-sin-obs {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  font-style: italic;
+}
 .btn-icon-mini { padding: 0.2rem 0.4rem; background: #e2e8f0; border: none; border-radius: 4px; cursor: pointer; }
 .btn-icon-mini:hover { background: #cbd5e1; }
 .btn-danger-mini:hover { background: #fecaca !important; }
-.edit-textarea { width: 100%; padding: 0.4rem; font-size: 0.85rem; margin-top: 0.5rem; border: 1px solid #e2e8f0; border-radius: 6px; }
-.edit-acciones { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .btn-cancel-mini { background: #94a3b8 !important; }
 .historial-item-cierre {
   background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
@@ -828,18 +799,6 @@ async function saveAvance() {
   border-radius: 6px;
   margin-right: 0.5rem;
   margin-bottom: 0.25rem;
-}
-.comentario-add {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-.comentario-add textarea {
-  padding: 0.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 0.9rem;
 }
 .btn-small {
   align-self: flex-start;

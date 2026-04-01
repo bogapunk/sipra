@@ -8,7 +8,13 @@ export function extraerMensajeError(err: unknown, fallback = 'Error de conexión
   if (typeof data === 'string') return data
   if (data && typeof data === 'object') {
     const obj = data as Record<string, unknown>
-    if ('detail' in obj && obj.detail) return String(obj.detail)
+    if ('detail' in obj && obj.detail != null && obj.detail !== '') {
+      const d = obj.detail
+      if (Array.isArray(d)) {
+        return d.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')
+      }
+      return String(d)
+    }
     const mensajes: string[] = []
     for (const [k, v] of Object.entries(obj)) {
       if (Array.isArray(v)) mensajes.push(...v.map(String))

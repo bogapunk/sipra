@@ -1,43 +1,39 @@
-# Desarrollo: PostgreSQL local + hot-reload backend
+# Desarrollo: alias de docker-compose.yml (solo Microsoft SQL Server, sin PostgreSQL).
+# Uso: docker compose -f docker-compose.dev.yml up -d
+# Equivale al stack principal; mantener .env con DB_* para SQL Server.
 
 services:
-  db:
-    image: postgres:17-alpine
-    environment:
-      - POSTGRES_DB=sipra
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data_dev:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d sipra"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    environment:
-      - DJANGO_SETTINGS_MODULE=config.settings
-      - DB_PROVIDER=postgres
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/sipra
-      - DEBUG=1
-      - SECRET_KEY=dev-key
-    ports:
-      - "8001:8001"
     volumes:
-      - ./backend:/app
+      - sipra_backups:/app/backups
+    environment:
+      DB_TYPE: ${DB_TYPE:-mssql}
+      DB_HOST: ${DB_HOST:-10.1.9.113}
+      DB_PORT: ${DB_PORT:-1433}
+      DB_NAME: ${DB_NAME:-Sipra-Test}
+      DB_USER: ${DB_USER:-SA}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_ODBC_DRIVER: ${DB_ODBC_DRIVER:-ODBC Driver 18 for SQL Server}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-3}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-2}
+      DEBUG: ${DEBUG:-1}
+      SECRET_KEY: ${SECRET_KEY:-cambiar-en-produccion-clave-secreta-larga}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
     depends_on:
-      db:
-        condition: service_healthy
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             python manage.py cargar_secretarias 2>/dev/null || true &&
-             python manage.py runserver 0.0.0.0:8001"
+      - backend
+    restart: unless-stopped
 
 volumes:
-  postgres_data_dev:
+  sipra_backups:

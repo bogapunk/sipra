@@ -26,7 +26,7 @@ const secretarias = ref<Record<string, unknown>[]>([])
 const showForm = ref(false)
 const showVerModal = ref(false)
 const usuarioVer = ref<Record<string, unknown> | null>(null)
-const tipoOrganizacionUsuario = ref<'area' | 'secretaria'>('area')
+const tipoOrganizacionUsuario = ref<'ninguna' | 'area' | 'secretaria'>('area')
 const editingId = ref<number | null>(null)
 const form = ref({
   nombre: '',
@@ -141,7 +141,13 @@ const openEdit = async (u: Record<string, unknown>) => {
   const rolNombre = (roles.value.find((r: Record<string, unknown>) => r.id === u.rol) as Record<string, unknown>)?.nombre as string
   let areaVal = (u.area ? (typeof u.area === 'object' ? (u.area as { id?: number }).id : u.area) : null) as number | null
   let secretariaVal = (u.secretaria ? (typeof u.secretaria === 'object' ? (u.secretaria as { id?: number }).id : u.secretaria) : null) as number | null
-  tipoOrganizacionUsuario.value = secretariaVal ? 'secretaria' : 'area'
+  if (rolNombre === 'Administrador' || rolNombre === 'Carga') {
+    tipoOrganizacionUsuario.value = secretariaVal ? 'secretaria' : 'area'
+  } else if (rolNombre === 'Visualización') {
+    tipoOrganizacionUsuario.value = secretariaVal ? 'secretaria' : areaVal ? 'area' : 'ninguna'
+  } else {
+    tipoOrganizacionUsuario.value = secretariaVal ? 'secretaria' : 'area'
+  }
   form.value = {
     nombre: (u.nombre as string) || '',
     apellido: (u.apellido as string) || '',
@@ -168,6 +174,25 @@ const passwordsCoinciden = computed(() => {
   return form.value.password === form.value.passwordConfirm
 })
 
+const rolNombreActual = computed(() => (roles.value.find((r: Record<string, unknown>) => r.id === form.value.rol) as Record<string, unknown>)?.nombre as string || '')
+
+const organizacionValida = computed(() => {
+  const rn = rolNombreActual.value
+  if (!form.value.rol) return true
+  if (rn === 'Carga' || rn === 'Administrador') {
+    if (tipoOrganizacionUsuario.value === 'area') return !!form.value.area
+    if (tipoOrganizacionUsuario.value === 'secretaria') return !!form.value.secretaria
+    return false
+  }
+  if (rn === 'Visualización') {
+    if (tipoOrganizacionUsuario.value === 'ninguna') return true
+    if (tipoOrganizacionUsuario.value === 'area') return !!form.value.area
+    if (tipoOrganizacionUsuario.value === 'secretaria') return !!form.value.secretaria
+    return false
+  }
+  return true
+})
+
 const puedeGuardar = computed(() => {
   if (requierePassword.value) {
     if (!form.value.password) return false
@@ -175,7 +200,7 @@ const puedeGuardar = computed(() => {
     if (!passwordValida.value.valida) return false
     if (!passwordsCoinciden.value) return false
   }
-  return true
+  return organizacionValida.value
 })
 
 const save = async () => {
@@ -184,6 +209,8 @@ const save = async () => {
       toast.error(passwordValida.value.errores.join('. '))
     } else if (requierePassword.value && !passwordsCoinciden.value) {
       toast.error('Las contraseñas no coinciden.')
+    } else if (!organizacionValida.value) {
+      toast.error('Indique área o secretaría según corresponda al rol (obligatorio para Carga y Administrador).')
     }
     return
   }
@@ -191,17 +218,21 @@ const save = async () => {
   delete payload.passwordConfirm
   if (!payload.password) delete payload.password
   const rolNombre = (roles.value.find((r: Record<string, unknown>) => r.id === payload.rol) as Record<string, unknown> | undefined)?.nombre as string
-  if (rolNombre === 'Administrador') {
-    payload.area = null
-    payload.secretaria = null
-  } else if (rolNombre === 'Carga') {
+  if (rolNombre === 'Carga' || rolNombre === 'Administrador') {
     if (tipoOrganizacionUsuario.value === 'area') {
       payload.secretaria = null
     } else {
       payload.area = null
     }
   } else if (rolNombre === 'Visualización') {
-    payload.secretaria = null
+    if (tipoOrganizacionUsuario.value === 'ninguna') {
+      payload.area = null
+      payload.secretaria = null
+    } else if (tipoOrganizacionUsuario.value === 'area') {
+      payload.secretaria = null
+    } else if (tipoOrganizacionUsuario.value === 'secretaria') {
+      payload.area = null
+    }
   }
 
   try {
@@ -231,21 +262,16 @@ const remove = async (id: number) => {
   }
 }
 
-const rolNombreActual = computed(() => (roles.value.find((r: Record<string, unknown>) => r.id === form.value.rol) as Record<string, unknown>)?.nombre as string || '')
-
-const areasParaSeleccionar = computed(() => areas.value)
-
 function onRolChange() {
   if (!form.value.rol) return
   const nombre = rolNombreActual.value
-  if (nombre === 'Administrador') {
-    form.value.area = null
-    form.value.secretaria = null
-  } else if (nombre === 'Carga') {
+  if (nombre === 'Carga' || nombre === 'Administrador') {
     tipoOrganizacionUsuario.value = 'area'
     form.value.area = null
     form.value.secretaria = null
   } else if (nombre === 'Visualización') {
+    tipoOrganizacionUsuario.value = 'ninguna'
+    form.value.area = null
     form.value.secretaria = null
   }
 }
@@ -302,9 +328,9 @@ onMounted(load)
           <th>Nombre completo</th>
           <th>Email</th>
           <th>Rol</th>
-          <th>Área / Secretaría</th>
+          <th class="col-area-secretaria">Área / Secretaría</th>
           <th>Estado</th>
-          <th class="actions-header">Acciones</th>
+          <th class="actions-header col-acciones">Acciones</th>
         </tr>
       </thead>
       <tbody>
@@ -312,16 +338,16 @@ onMounted(load)
           <td>{{ u.nombre_completo || u.nombre }}</td>
           <td>{{ u.email }}</td>
           <td>{{ u.rol_nombre || '-' }}</td>
-          <td>{{ u.area_nombre || u.secretaria_nombre || '-' }}</td>
+          <td class="col-area-secretaria">{{ u.area_nombre || u.secretaria_nombre || '—' }}</td>
           <td>
             <span class="status-chip" :class="u.estado ? 'status-active' : 'status-inactive'">
               {{ u.estado ? 'Activo' : 'Inactivo' }}
             </span>
           </td>
-          <td class="actions-cell">
-            <button class="btn-action" title="Ver" @click="openVer(u)"><IconEye class="btn-icon-sm" /> Ver</button>
-            <button class="btn-action" title="Editar" @click="openEdit(u)"><IconEdit class="btn-icon-sm" /> Editar</button>
-            <button class="btn-action-danger" title="Eliminar" @click="remove(u.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+          <td class="actions-cell col-acciones">
+            <button type="button" class="btn-action btn-action-compact btn-action-ver" title="Ver" @click="openVer(u)"><IconEye class="btn-icon-sm" /> Ver</button>
+            <button type="button" class="btn-action btn-action-compact btn-action-editar" title="Editar" @click="openEdit(u)"><IconEdit class="btn-icon-sm" /> Editar</button>
+            <button type="button" class="btn-action-danger btn-action-compact" title="Eliminar" @click="remove(u.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
           </td>
         </tr>
       </tbody>
@@ -399,7 +425,7 @@ onMounted(load)
             <option :value="null">Seleccionar</option>
             <option v-for="r in roles" :key="(r.id as number)" :value="r.id">{{ r.nombre }}</option>
           </select>
-          <template v-if="form.rol && rolNombreActual === 'Carga'">
+          <template v-if="form.rol && (rolNombreActual === 'Carga' || rolNombreActual === 'Administrador')">
             <label class="area-label">Pertenece a:</label>
             <div class="radio-group">
               <label class="radio-label app-radio">
@@ -427,11 +453,35 @@ onMounted(load)
             </template>
           </template>
           <template v-else-if="form.rol && rolNombreActual === 'Visualización'">
-            <label class="area-label">Área (opcional)</label>
-            <select v-model="form.area" class="app-select">
-              <option :value="null">Sin área</option>
-              <option v-for="a in areasParaSeleccionar" :key="(a.id as number)" :value="a.id">{{ a.nombre }}</option>
-            </select>
+            <label class="area-label">Dependencia organizacional (opcional)</label>
+            <div class="radio-group">
+              <label class="radio-label app-radio">
+                <input v-model="tipoOrganizacionUsuario" type="radio" value="ninguna" @change="form.area = null; form.secretaria = null" />
+                Sin dependencia
+              </label>
+              <label class="radio-label app-radio">
+                <input v-model="tipoOrganizacionUsuario" type="radio" value="area" @change="form.area = null; form.secretaria = null" />
+                Área
+              </label>
+              <label class="radio-label app-radio">
+                <input v-model="tipoOrganizacionUsuario" type="radio" value="secretaria" @change="form.area = null; form.secretaria = null" />
+                Secretaría
+              </label>
+            </div>
+            <template v-if="tipoOrganizacionUsuario === 'area'">
+              <label>Área</label>
+              <select v-model="form.area" class="app-select">
+                <option :value="null">Seleccionar área</option>
+                <option v-for="a in areas" :key="(a.id as number)" :value="a.id">{{ a.nombre }}</option>
+              </select>
+            </template>
+            <template v-else-if="tipoOrganizacionUsuario === 'secretaria'">
+              <label>Secretaría</label>
+              <select v-model="form.secretaria" class="app-select">
+                <option :value="null">Seleccionar secretaría</option>
+                <option v-for="s in secretarias" :key="(s.id as number)" :value="s.id">{{ s.codigo }} - {{ s.nombre }}</option>
+              </select>
+            </template>
           </template>
           <label class="checkbox app-checkbox">
             <input v-model="form.estado" type="checkbox" />
@@ -470,6 +520,7 @@ onMounted(load)
 .toolbar-buttons { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
+/* Tamaño de botones Acciones: ver assets/styles.css (.table .actions-cell) */
 .modal-overlay {
   position: fixed;
   inset: 0;

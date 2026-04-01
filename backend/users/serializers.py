@@ -66,10 +66,10 @@ class UsuarioSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 'Un usuario puede pertenecer a un Área O a una Secretaría, no a ambas.'
             )
-        if rol and rol.nombre == 'Carga':
+        if rol and rol.nombre in ('Carga', 'Administrador'):
             if not area and not secretaria:
                 raise serializers.ValidationError(
-                    'Para el rol Carga es obligatorio asignar un Área o una Secretaría.'
+                    'Para los roles Carga y Administrador es obligatorio asignar un Área o una Secretaría.'
                 )
         return data
 

@@ -5,6 +5,7 @@
     <ToastContainer />
     <AppLayout v-if="$route.path !== '/login'">
       <router-view v-slot="{ Component }">
+        <!-- Cache de vistas: al volver a un panel se evita remount y nuevas peticiones iniciales (máx. instancias LRU) -->
         <keep-alive :max="20">
           <component :is="Component" v-if="Component" :key="$route.path" />
         </keep-alive>

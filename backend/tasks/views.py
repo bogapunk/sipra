@@ -109,13 +109,13 @@ class TareaViewSet(viewsets.ModelViewSet):
         responsable = self.request.query_params.get("responsable")
         usuario = self.request.query_params.get("usuario")
         secretaria = self.request.query_params.get("secretaria")
-        search = (self.request.query_params.get("search") or "").strip()
+        search = (self.request.query_params.get("search") or self.request.query_params.get("q") or "").strip()
         vencimiento = self.request.query_params.get("vencimiento")
         solo_raices = self.request.query_params.get("solo_raices") == "1"
         orden = (self.request.query_params.get("orden") or "").strip().lower()
         if usuario:
             from users.models import Usuario
-            from projects.models import Proyecto, ProyectoEquipo
+            from projects.models import Proyecto, ProyectoArea, ProyectoEquipo, ProyectoSecretaria
             u = Usuario.objects.filter(id=usuario).first()
             if u:
                 condiciones = Q(responsable_id=u.id)
@@ -124,8 +124,19 @@ class TareaViewSet(viewsets.ModelViewSet):
                 if u.secretaria_id:
                     condiciones |= Q(secretaria_id=u.secretaria_id)
                 proy_ids_responsable = Proyecto.objects.filter(usuario_responsable_id=u.id).values_list('id', flat=True)
+                proy_ids_creador = Proyecto.objects.filter(creado_por_id=u.id).values_list('id', flat=True)
                 proy_ids_equipo = ProyectoEquipo.objects.filter(usuario_id=u.id).values_list('proyecto_id', flat=True)
-                proy_ids = set(proy_ids_responsable) | set(proy_ids_equipo)
+                proy_ids = set(proy_ids_responsable) | set(proy_ids_creador) | set(proy_ids_equipo)
+                if u.area_id:
+                    proy_ids |= set(
+                        ProyectoArea.objects.filter(area_id=u.area_id).values_list('proyecto_id', flat=True)
+                    )
+                if u.secretaria_id:
+                    proy_ids |= set(
+                        ProyectoSecretaria.objects.filter(secretaria_id=u.secretaria_id).values_list(
+                            'proyecto_id', flat=True
+                        )
+                    )
                 if proy_ids:
                     condiciones |= Q(proyecto_id__in=proy_ids)
                 qs = qs.filter(condiciones)
@@ -139,16 +150,10 @@ class TareaViewSet(viewsets.ModelViewSet):
             qs = qs.filter(estado=estado)
         if responsable and not usuario:
             qs = qs.filter(responsable_id=responsable)
+        qs = filter_tasks_for_user(qs, self.request.user)
         if search:
-            qs = qs.filter(
-                Q(titulo__icontains=search) |
-                Q(descripcion__icontains=search) |
-                Q(proyecto__nombre__icontains=search) |
-                Q(responsable__nombre__icontains=search) |
-                Q(responsable__apellido__icontains=search) |
-                Q(area__nombre__icontains=search) |
-                Q(secretaria__nombre__icontains=search)
-            )
+            from .search import aplicar_busqueda_tareas
+            qs = aplicar_busqueda_tareas(qs, search)
         if vencimiento:
             hoy = timezone.now().date()
             limite = hoy + timedelta(days=7)
@@ -161,7 +166,7 @@ class TareaViewSet(viewsets.ModelViewSet):
                 )
             elif vencimiento == 'en-plazo':
                 qs = qs.exclude(estado='Finalizada').filter(fecha_vencimiento__gt=limite)
-        qs = filter_tasks_for_user(qs, self.request.user)
+        qs = qs.select_related('area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre')
         if getattr(self, 'action', None) == 'retrieve':
             return qs.prefetch_related(
                 Prefetch(

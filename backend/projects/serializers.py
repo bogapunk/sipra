@@ -2,10 +2,12 @@ from decimal import Decimal
 
 from rest_framework import serializers
 from django.db.models import Avg
+from areas.models import Area
+from secretarias.models import Secretaria
 from .upload_validators import validate_uploaded_file, validate_original_filename
 from .models import (
     Eje, Plan, Programa, ObjetivoEstrategico,
-    Proyecto, ProyectoArea, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto, Indicador,
+    Proyecto, ProyectoArea, ProyectoSecretaria, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto, Indicador,
     ComentarioAuditLog, AdjuntoAuditLog,
 )
 
@@ -91,6 +93,10 @@ class ProyectoSerializer(serializers.ModelSerializer):
     equipo = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
     presupuesto_items = ProyectoPresupuestoItemSerializer(many=True, required=False)
     presupuesto_cargado = serializers.SerializerMethodField()
+    areas_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
+    secretarias_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
+    areas_asignadas_ids = serializers.SerializerMethodField(read_only=True)
+    secretarias_asignadas_ids = serializers.SerializerMethodField(read_only=True)
 
     def get_equipo_nombres(self, obj):
         return [pe.usuario.nombre_completo for pe in obj.equipo.select_related('usuario').all()]
@@ -107,6 +113,22 @@ class ProyectoSerializer(serializers.ModelSerializer):
             for item in ProyectoPresupuestoItem.objects.filter(proyecto=obj).only('monto')
         )
         return float(round(total, 2))
+
+    def get_areas_asignadas_ids(self, obj):
+        ids = set()
+        if obj.area_id:
+            ids.add(obj.area_id)
+        for pa in obj.proyectoarea_set.all():
+            ids.add(pa.area_id)
+        return sorted(ids)
+
+    def get_secretarias_asignadas_ids(self, obj):
+        ids = set()
+        if obj.secretaria_id:
+            ids.add(obj.secretaria_id)
+        for ps in obj.proyectosecretaria_set.all():
+            ids.add(ps.secretaria_id)
+        return sorted(ids)
 
     def _sync_presupuesto_items(self, proyecto, items_data):
         if items_data is None:
@@ -133,36 +155,122 @@ class ProyectoSerializer(serializers.ModelSerializer):
 
         proyecto.presupuesto_items.exclude(id__in=ids_conservados).delete()
 
+    def _sync_areas_y_secretarias(self, proyecto, areas_ids, secretarias_ids):
+        if areas_ids is not None:
+            proyecto.proyectoarea_set.all().delete()
+            seen = set()
+            for aid in areas_ids:
+                if aid in seen:
+                    continue
+                seen.add(aid)
+                ProyectoArea.objects.get_or_create(proyecto=proyecto, area_id=aid)
+            if areas_ids:
+                first = Area.objects.filter(pk=areas_ids[0]).first()
+                proyecto.area = first
+                proyecto.secretaria = None
+                proyecto.save(update_fields=['area', 'secretaria'])
+        elif secretarias_ids is not None:
+            proyecto.proyectosecretaria_set.all().delete()
+            seen = set()
+            for sid in secretarias_ids:
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                ProyectoSecretaria.objects.get_or_create(proyecto=proyecto, secretaria_id=sid)
+            if secretarias_ids:
+                first = Secretaria.objects.filter(pk=secretarias_ids[0]).first()
+                proyecto.secretaria = first
+                proyecto.area = None
+                proyecto.save(update_fields=['area', 'secretaria'])
+
     def create(self, validated_data):
         equipo_ids = validated_data.pop('equipo', [])
         items_data = validated_data.pop('presupuesto_items', [])
+        areas_ids = validated_data.pop('areas_ids', None)
+        secretarias_ids = validated_data.pop('secretarias_ids', None)
+        if areas_ids is None and secretarias_ids is None:
+            a = validated_data.get('area')
+            s = validated_data.get('secretaria')
+            if a:
+                areas_ids = [a.id]
+                validated_data.pop('area', None)
+            elif s:
+                secretarias_ids = [s.id]
+                validated_data.pop('secretaria', None)
         proyecto = super().create(validated_data)
+        if areas_ids is not None or secretarias_ids is not None:
+            self._sync_areas_y_secretarias(proyecto, areas_ids, secretarias_ids)
         for uid in equipo_ids:
             ProyectoEquipo.objects.get_or_create(proyecto=proyecto, usuario_id=uid)
         self._sync_presupuesto_items(proyecto, items_data)
+        from .dependencias import actualizar_bandera_transversal
+        actualizar_bandera_transversal(proyecto)
         return proyecto
 
     def update(self, instance, validated_data):
         equipo_ids = validated_data.pop('equipo', None)
         items_data = validated_data.pop('presupuesto_items', None)
+        areas_ids = validated_data.pop('areas_ids', None)
+        secretarias_ids = validated_data.pop('secretarias_ids', None)
+        if areas_ids is not None or secretarias_ids is not None:
+            validated_data.pop('area', None)
+            validated_data.pop('secretaria', None)
+        if areas_ids is None and secretarias_ids is None:
+            if validated_data.get('area'):
+                areas_ids = [validated_data['area'].id]
+                validated_data.pop('area', None)
+            elif validated_data.get('secretaria'):
+                secretarias_ids = [validated_data['secretaria'].id]
+                validated_data.pop('secretaria', None)
         proyecto = super().update(instance, validated_data)
+        if areas_ids is not None or secretarias_ids is not None:
+            self._sync_areas_y_secretarias(proyecto, areas_ids, secretarias_ids)
         if equipo_ids is not None:
             proyecto.equipo.exclude(usuario_id__in=equipo_ids).delete()
             for uid in equipo_ids:
                 ProyectoEquipo.objects.get_or_create(proyecto=proyecto, usuario_id=uid)
         self._sync_presupuesto_items(proyecto, items_data)
+        from .dependencias import actualizar_bandera_transversal
+        actualizar_bandera_transversal(proyecto)
         return proyecto
 
     def validate(self, data):
+        initial = getattr(self, 'initial_data', {}) or {}
         area = data.get('area')
         secretaria = data.get('secretaria')
         if self.instance:
             area = area if 'area' in data else self.instance.area
             secretaria = secretaria if 'secretaria' in data else self.instance.secretaria
-        if area and secretaria:
+        has_areas_ids = 'areas_ids' in initial
+        has_secretarias_ids = 'secretarias_ids' in initial
+        if has_areas_ids and has_secretarias_ids:
+            a_ids = initial.get('areas_ids') or []
+            s_ids = initial.get('secretarias_ids') or []
+            if a_ids and s_ids:
+                raise serializers.ValidationError(
+                    'No puede combinar áreas y secretarías en el mismo proyecto.'
+                )
+        if has_areas_ids:
+            a_ids = initial.get('areas_ids') or []
+            if not a_ids:
+                raise serializers.ValidationError({'areas_ids': 'Seleccione al menos un área.'})
+            data.pop('area', None)
+            data.pop('secretaria', None)
+        elif has_secretarias_ids:
+            s_ids = initial.get('secretarias_ids') or []
+            if not s_ids:
+                raise serializers.ValidationError({'secretarias_ids': 'Seleccione al menos una secretaría.'})
+            data.pop('area', None)
+            data.pop('secretaria', None)
+        elif area and secretaria:
             raise serializers.ValidationError(
                 'Seleccione solo un Área o una Secretaría, no ambos.'
             )
+        if self.instance is None and not has_areas_ids and not has_secretarias_ids:
+            if not data.get('area') and not data.get('secretaria'):
+                raise serializers.ValidationError(
+                    'Debe asignar al menos un área o una secretaría.'
+                )
         presupuesto_total = data.get(
             'presupuesto_total',
             getattr(self.instance, 'presupuesto_total', Decimal('0')),
@@ -172,14 +280,6 @@ class ProyectoSerializer(serializers.ModelSerializer):
             getattr(self.instance, 'fuente_financiamiento', Proyecto.FUENTE_PROVINCIAL),
         )
         items = data.get('presupuesto_items', None)
-        if self.instance is None and not items:
-            raise serializers.ValidationError({
-                'presupuesto_items': 'Debe cargar al menos un item presupuestario.'
-            })
-        if items is not None and len(items) == 0:
-            raise serializers.ValidationError({
-                'presupuesto_items': 'Debe cargar al menos un item presupuestario.'
-            })
         if Decimal(str(presupuesto_total or 0)) < 0:
             raise serializers.ValidationError({
                 'presupuesto_total': 'El presupuesto total no puede ser negativo.'
@@ -191,7 +291,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'presupuesto_total': 'Si la fuente es Sin Erogacion, el presupuesto total debe ser 0.'
             })
-        if items is not None:
+        if items is not None and len(items) > 0:
             total_items = sum(Decimal(str(item.get('monto') or 0)) for item in items)
             if total_items > Decimal(str(presupuesto_total or 0)):
                 raise serializers.ValidationError({
@@ -208,9 +308,11 @@ class ProyectoSerializer(serializers.ModelSerializer):
             'programa', 'objetivo_estrategico',
             'usuario_responsable', 'usuario_responsable_nombre',
             'area', 'area_nombre', 'secretaria',
+            'areas_ids', 'secretarias_ids', 'areas_asignadas_ids', 'secretarias_asignadas_ids',
+            'es_transversal',
             'equipo', 'equipo_nombres', 'presupuesto_items', 'presupuesto_cargado',
         ]
-        read_only_fields = ['creado_por', 'fecha_creacion']
+        read_only_fields = ['creado_por', 'fecha_creacion', 'es_transversal']
 
 
 class ProyectoDashboardSerializer(serializers.ModelSerializer):
@@ -223,6 +325,7 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
     responsable_nombre = serializers.SerializerMethodField()
     secretaria_nombre = serializers.SerializerMethodField()
     areas_asignadas = serializers.SerializerMethodField()
+    secretarias_asignadas = serializers.SerializerMethodField()
     area_nombre = serializers.SerializerMethodField()
     equipo_nombres = serializers.SerializerMethodField()
 
@@ -231,7 +334,8 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
         fields = ['id', 'nombre', 'descripcion', 'estado', 'porcentaje_avance', 'fecha_ultima_actualizacion',
                   'area_ultima_actualizacion', 'usuario_ultima_actualizacion', 'responsable_nombre',
                   'usuario_responsable', 'secretaria', 'secretaria_nombre', 'area', 'area_nombre',
-                  'areas_asignadas', 'equipo_nombres', 'creado_por', 'fecha_inicio', 'fecha_fin_estimada']
+                  'areas_asignadas', 'secretarias_asignadas', 'es_transversal', 'equipo_nombres', 'creado_por',
+                  'fecha_inicio', 'fecha_fin_estimada']
 
     def _get_avance(self, obj):
         avances = self.context.get('avances')
@@ -290,9 +394,32 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
         return obj.area.nombre if obj.area else None
 
     def get_areas_asignadas(self, obj):
-        if obj.area_id:
-            return [obj.area.nombre] if obj.area else []
-        return [pa.area.nombre for pa in obj.proyectoarea_set.all() if pa.area]
+        nombres = []
+        vistos = set()
+        if obj.area_id and obj.area:
+            n = obj.area.nombre
+            if n and n not in vistos:
+                nombres.append(n)
+                vistos.add(n)
+        for pa in obj.proyectoarea_set.all():
+            if pa.area and pa.area.nombre and pa.area.nombre not in vistos:
+                nombres.append(pa.area.nombre)
+                vistos.add(pa.area.nombre)
+        return nombres
+
+    def get_secretarias_asignadas(self, obj):
+        nombres = []
+        vistos = set()
+        if obj.secretaria_id and obj.secretaria:
+            n = obj.secretaria.nombre
+            if n and n not in vistos:
+                nombres.append(n)
+                vistos.add(n)
+        for ps in obj.proyectosecretaria_set.all():
+            if ps.secretaria and ps.secretaria.nombre and ps.secretaria.nombre not in vistos:
+                nombres.append(ps.secretaria.nombre)
+                vistos.add(ps.secretaria.nombre)
+        return nombres
 
     def get_equipo_nombres(self, obj):
         equipo_rel = getattr(obj, 'equipo', None)
@@ -307,6 +434,12 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
 class ProyectoAreaSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProyectoArea
+        fields = "__all__"
+
+
+class ProyectoSecretariaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProyectoSecretaria
         fields = "__all__"
 
 

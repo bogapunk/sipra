@@ -87,7 +87,8 @@ class TareaSerializer(TareaBaseSerializer):
                     'area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'
                 ).order_by('orden', 'id')
             )
-        return TareaSerializer(hijos, many=True, context={'subtarea': True}).data
+        # TareaListSerializer evita recursión profunda y reduce payload (retrieve/detalle).
+        return TareaListSerializer(hijos, many=True).data
 
     class Meta:
         model = Tarea

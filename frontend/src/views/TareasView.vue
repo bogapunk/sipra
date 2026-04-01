@@ -18,6 +18,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import LoaderSpinner from '@/components/LoaderSpinner.vue'
 import { estadoVencimiento, claseVencimiento } from '@/utils/vencimiento'
 import { extraerMensajeError } from '@/utils/apiError'
+import { formatFechaCorta, formatFechaHora } from '@/utils/fecha'
+import { comentariosPorIdHistorial } from '@/utils/historialComentarios'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +34,7 @@ function puedeEditarEliminarComentario(c: Record<string, unknown>): boolean {
   const ahora = Date.now()
   return (ahora - fecha) / 60000 <= MINUTOS_EDICION
 }
+
 const { confirmDelete } = useConfirmDelete()
 const toast = useToast()
 const tareas = ref<Record<string, unknown>[]>([])
@@ -114,9 +117,11 @@ async function cargarProyectosParaSelector() {
   }
 }
 
-async function cargarTareasPadreSelector() {
+async function cargarTareasPadreSelector(proyectoId?: number | null) {
   try {
-    const res = await api.get('tareas/', { params: { solo_raices: 1 } })
+    const params: Record<string, string | number> = { solo_raices: 1 }
+    if (proyectoId != null && proyectoId > 0) params.proyecto = proyectoId
+    const res = await api.get('tareas/', { params })
     tareasPadreOptions.value = parseListResponse(res.data)
   } catch {
     tareasPadreOptions.value = []
@@ -224,10 +229,17 @@ watch(
 
 const openCreate = async () => {
   editingId.value = null
-  await Promise.all([cargarProyectosParaSelector(), cargarTareasPadreSelector()])
+  const proyRuta = route.query.proyecto
+  const proyDesdeRuta = proyRuta != null && String(proyRuta).trim() !== '' ? Number(proyRuta) : null
+  const proyInicial =
+    proyDesdeRuta != null && !Number.isNaN(proyDesdeRuta) && proyDesdeRuta > 0 ? proyDesdeRuta : null
+  await Promise.all([
+    cargarProyectosParaSelector(),
+    cargarTareasPadreSelector(proyInicial ?? undefined),
+  ])
   tipoOrganizacion.value = 'area'
   form.value = {
-    proyecto: null,
+    proyecto: proyInicial,
     tarea_padre: null,
     etapa: null,
     area: null,
@@ -247,11 +259,15 @@ const openCreate = async () => {
 
 const openEdit = async (t: Record<string, unknown>) => {
   editingId.value = t.id as number
-  await Promise.all([cargarProyectosParaSelector(), cargarTareasPadreSelector()])
   const areaId = t.area ? (typeof t.area === 'object' ? (t.area as { id?: number }).id : t.area) : null
   const secretariaId = t.secretaria ? (typeof t.secretaria === 'object' ? (t.secretaria as { id?: number }).id : t.secretaria) : null
   tipoOrganizacion.value = secretariaId ? 'secretaria' : (areaId ? 'area' : 'ninguna')
   const proyId = t.proyecto ? (typeof t.proyecto === 'object' ? (t.proyecto as { id?: number }).id : t.proyecto) : null
+  const proyNum = proyId != null ? Number(proyId) : null
+  await Promise.all([
+    cargarProyectosParaSelector(),
+    cargarTareasPadreSelector(proyNum != null && !Number.isNaN(proyNum) && proyNum > 0 ? proyNum : undefined),
+  ])
   const padreId = t.tarea_padre ? (typeof t.tarea_padre === 'object' ? (t.tarea_padre as { id?: number }).id : t.tarea_padre) : null
   form.value = {
     proyecto: proyId != null ? Number(proyId) : null,
@@ -354,6 +370,22 @@ const remove = async (id: number) => {
 
 const comentariosTareaVer = ref<Record<string, unknown>[]>([])
 const adjuntosTareaVer = ref<Record<string, unknown>[]>([])
+const historialTareaVer = ref<Record<string, unknown>[]>([])
+const comentariosPorHistorialVerMap = computed(() =>
+  comentariosPorIdHistorial(
+    historialTareaVer.value.map((h) => ({ id: Number(h.id), fecha: String(h.fecha || '') })),
+    comentariosTareaVer.value.map((c) => ({
+      ...c,
+      id: Number(c.id),
+      fecha: String(c.fecha || ''),
+    })) as Array<Record<string, unknown> & { id: number; fecha: string }>,
+  ),
+)
+function comentariosTareaEnSegmento(hId: unknown): Record<string, unknown>[] {
+  const id = Number(hId)
+  if (!Number.isFinite(id)) return []
+  return comentariosPorHistorialVerMap.value.get(id) ?? []
+}
 const nuevoComentarioVer = ref('')
 const comentarioEditandoVer = ref<number | null>(null)
 const textoEditandoVer = ref('')
@@ -372,14 +404,24 @@ const openVer = async (t: Record<string, unknown>) => {
   tareaVer.value = t
   showVerModal.value = true
   nuevoComentarioVer.value = ''
+  historialTareaVer.value = []
+  invalidateApiCache('historial')
   try {
-    const [comRes, adjRes] = await Promise.all([
+    const [histRes, comRes, adjRes] = await Promise.all([
+      api.get('historial/', { params: { tarea: t.id } }),
       api.get('comentarios-tarea/', { params: { tarea: t.id } }),
       api.get('adjuntos-tarea/', { params: { tarea: t.id } }),
     ])
+    const rawHist = Array.isArray(histRes.data) ? histRes.data : (histRes.data?.results || [])
+    historialTareaVer.value = (rawHist as Record<string, unknown>[]).sort((a, b) => {
+      const fa = (a.fecha as string) || ''
+      const fb = (b.fecha as string) || ''
+      return fb.localeCompare(fa)
+    })
     comentariosTareaVer.value = Array.isArray(comRes.data) ? comRes.data : (comRes.data?.results || [])
     adjuntosTareaVer.value = Array.isArray(adjRes.data) ? adjRes.data : (adjRes.data?.results || [])
   } catch {
+    historialTareaVer.value = []
     comentariosTareaVer.value = []
     adjuntosTareaVer.value = []
   }
@@ -388,6 +430,7 @@ const openVer = async (t: Record<string, unknown>) => {
 const closeVerModal = () => {
   showVerModal.value = false
   tareaVer.value = null
+  historialTareaVer.value = []
   comentarioEditandoVer.value = null
   textoEditandoVer.value = ''
   adjuntoEditandoVer.value = null
@@ -565,7 +608,7 @@ const guardarAsignar = async () => {
 
 async function descargarExcel() {
   const lista = tareasFiltradas.value
-  const headers = ['Título', 'Tarea padre', 'Área/Secretaría', 'Usuario responsable', 'Estado', 'Avance %', 'Prioridad', 'Proyecto']
+  const headers = ['Tarea', 'Tarea padre', 'Área/Secretaría', 'Usuario responsable', 'Estado', 'Avance %', 'Prioridad', 'Proyecto']
   const rows = lista.map((t: Record<string, unknown>) => [
     String(t.titulo || ''),
     String(t.tarea_padre_nombre || '-'),
@@ -709,6 +752,22 @@ async function abrirDetalleDesdeRuta() {
   }
 }
 
+async function abrirEdicionDesdeRuta() {
+  const editId = route.query.editar
+  if (!editId) return
+  const id = Number(editId)
+  if (!id) return
+  try {
+    const res = await api.get(`tareas/${id}/`)
+    await openEdit(res.data as Record<string, unknown>)
+    const nextQuery = { ...route.query }
+    delete nextQuery.editar
+    router.replace({ path: '/tareas', query: nextQuery })
+  } catch {
+    toast.error('No se pudo cargar la tarea para editar.')
+  }
+}
+
 function limpiarFiltros() {
   filtroEstado.value = ''
   buscarTitulo.value = ''
@@ -738,10 +797,15 @@ onMounted(async () => {
   // Carga principal — no bloqueada por el soporte
   await Promise.all([load(1), loadResumenGlobal()])
   await abrirDetalleDesdeRuta()
+  await abrirEdicionDesdeRuta()
 })
 
 watch(() => route.query.ver, async () => {
   await abrirDetalleDesdeRuta()
+})
+
+watch(() => route.query.editar, async () => {
+  await abrirEdicionDesdeRuta()
 })
 </script>
 
@@ -817,34 +881,44 @@ watch(() => route.query.ver, async () => {
         icono="tareas"
       />
     </template>
-    <div v-else class="table-wrapper">
+    <div v-else class="table-wrapper tareas-panel-table">
       <table class="table">
       <thead>
         <tr>
-          <th>Título</th>
+          <th class="col-nombre-tarea">Tarea</th>
           <th>Padre</th>
           <th>Área / Secretaría</th>
           <th>Usuario</th>
-          <th>Estado</th>
-          <th>Avance</th>
-          <th>Prioridad</th>
-          <th>Fecha</th>
-          <th class="actions-header">Acciones</th>
+          <th class="col-estado">Estado</th>
+          <th class="col-avance">Avance</th>
+          <th class="col-prioridad">Prioridad</th>
+          <th class="col-fecha-inicio" title="Fecha de inicio">Inicio</th>
+          <th class="col-fecha-fin" title="Fecha de fin">Fin</th>
+          <th class="actions-header col-acciones" title="Acciones">Acciones</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="item in tareasParaTabla" :key="(item.tarea.id as number)" :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '']">
-          <td :class="{ 'cell-indent': item.esSubtarea }">
+        <tr
+          v-for="item in tareasParaTabla"
+          :key="(item.tarea.id as number)"
+          :class="[claseVencimiento(estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)), item.esSubtarea ? 'row-subtarea' : '', 'fila-clic-detalle']"
+          role="button"
+          tabindex="0"
+          @click="openVer(item.tarea)"
+          @keydown.enter.prevent="openVer(item.tarea)"
+          @keydown.space.prevent="openVer(item.tarea)"
+        >
+          <td class="col-nombre-tarea" :class="{ 'cell-indent': item.esSubtarea }">
             <span v-if="item.esSubtarea" class="subtarea-icon">↳</span>
             {{ item.tarea.titulo }}
           </td>
           <td>{{ item.esSubtarea ? (item.tarea.tarea_padre_nombre || '-') : '—' }}</td>
           <td>{{ item.tarea.organizacion_nombre || item.tarea.area_nombre || item.tarea.secretaria_nombre || '-' }}</td>
           <td>{{ item.tarea.responsable_nombre || '-' }}</td>
-          <td>
+          <td class="col-estado">
             <span class="estado-chip" :class="estadoTareaClase(item.tarea.estado)">{{ item.tarea.estado }}</span>
           </td>
-          <td class="avance-cell">
+          <td class="avance-cell col-avance">
             <div class="progress-inline">
               <div class="progress-track">
                 <div class="progress-fill" :style="{ width: `${Math.min(100, Number(item.tarea.porcentaje_avance) || 0)}%` }" />
@@ -852,21 +926,27 @@ watch(() => route.query.ver, async () => {
               <span class="progress-value">{{ item.tarea.porcentaje_avance }}%</span>
             </div>
           </td>
-          <td>
+          <td class="col-prioridad">
             <span class="prioridad-chip" :class="prioridadClase(item.tarea.prioridad)">{{ item.tarea.prioridad }}</span>
           </td>
-          <td class="vencimiento-cell">
-            <span v-if="item.tarea.fecha_vencimiento" class="vencimiento-badge" :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)">
-              {{ item.tarea.fecha_vencimiento }}
-            </span>
+          <td class="fechas-cell col-fecha-inicio">
+            <span class="fecha-valor">{{ formatFechaCorta(item.tarea.fecha_inicio as string | undefined) }}</span>
+          </td>
+          <td class="fechas-cell col-fecha-fin">
+            <template v-if="item.tarea.fecha_vencimiento">
+              <span
+                class="vencimiento-badge"
+                :class="'vencimiento-badge-' + estadoVencimiento(item.tarea.fecha_vencimiento, item.tarea.estado)"
+              >{{ formatFechaCorta(item.tarea.fecha_vencimiento as string) }}</span>
+            </template>
             <span v-else class="vencimiento-sin">—</span>
           </td>
-          <td class="actions-cell">
-            <button class="btn-action" title="Ver" @click="openVer(item.tarea)"><IconEye class="btn-icon-sm" /> Ver</button>
+          <td class="actions-cell col-acciones" @click.stop>
+            <button type="button" class="btn-action btn-action-compact btn-action-ver" title="Ver" @click="openVer(item.tarea)"><IconEye class="btn-icon-sm" /> Ver</button>
             <template v-if="!isVisualizador">
-              <button class="btn-action" title="Asignar" @click="openAsignar(item.tarea)"><IconPlus class="btn-icon-sm" /> Asignar</button>
-              <button class="btn-action" title="Editar" @click="openEdit(item.tarea)"><IconEdit class="btn-icon-sm" /> Editar</button>
-              <button class="btn-action-danger" title="Eliminar" @click="remove(item.tarea.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+              <button type="button" class="btn-action btn-action-compact btn-action-asignar" title="Asignar" @click="openAsignar(item.tarea)"><IconPlus class="btn-icon-sm" /> Asignar</button>
+              <button type="button" class="btn-action btn-action-compact btn-action-editar" title="Editar" @click="openEdit(item.tarea)"><IconEdit class="btn-icon-sm" /> Editar</button>
+              <button type="button" class="btn-action-danger btn-action-compact" title="Eliminar" @click="remove(item.tarea.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
             </template>
           </td>
         </tr>
@@ -970,7 +1050,7 @@ watch(() => route.query.ver, async () => {
               <label>Fecha de vencimiento</label>
               <input v-model="form.fecha_vencimiento" type="date" required />
             </div>
-            <div class="col-prioridad">
+            <div class="col-prioridad-form">
               <label>Prioridad</label>
               <select v-model="form.prioridad">
                 <option value="Baja">Baja</option>
@@ -1053,6 +1133,45 @@ watch(() => route.query.ver, async () => {
               <span class="detalle-valor">{{ tareaVer.fecha_vencimiento || '-' }}</span>
             </div>
           </div>
+        </div>
+        <div class="detalle-section detalle-historial-avances">
+          <h3>Historial de avances</h3>
+          <p class="historial-leyenda">
+            Cada registro muestra el cambio de %, las <strong>observaciones</strong> (texto al guardar el avance) y los <strong>comentarios de la tarea</strong> del mismo período (entre ese avance y el anterior; el último incluye los posteriores al último avance). La lista completa de comentarios editable está debajo.
+          </p>
+          <div v-if="historialTareaVer.length" class="historial-lista historial-lista-scroll">
+            <div
+              v-for="h in historialTareaVer"
+              :key="(h.id as number)"
+              class="historial-item"
+              :class="{ 'historial-item-cierre': Number(h.porcentaje_avance) === 100 }"
+            >
+              <span v-if="Number(h.porcentaje_avance) === 100" class="historial-badge-cierre">✓ Tarea finalizada</span>
+              <div class="historial-item-meta">
+                <span class="historial-fecha">{{ formatFechaHora(h.fecha as string) }}</span>
+                <span v-if="h.usuario_nombre" class="historial-usuario">{{ h.usuario_nombre }}</span>
+                <span class="historial-valores">
+                  {{ h.porcentaje_anterior != null ? `${h.porcentaje_anterior}%` : '—' }} → {{ h.porcentaje_avance }}%
+                </span>
+              </div>
+              <div class="historial-observaciones">
+                <span class="historial-obs-label">Observaciones del avance</span>
+                <p v-if="String(h.comentario || '').trim()" class="historial-comentario-text">{{ String(h.comentario).trim() }}</p>
+                <p v-else class="historial-sin-obs">Sin observaciones en esta actualización.</p>
+              </div>
+              <div class="historial-comentarios-tarea">
+                <span class="historial-com-label">Comentarios de la tarea (período)</span>
+                <ul v-if="comentariosTareaEnSegmento(h.id).length" class="historial-com-lista">
+                  <li v-for="c in comentariosTareaEnSegmento(h.id)" :key="(c.id as number)" class="historial-com-item">
+                    <span class="historial-com-meta">{{ c.usuario_nombre || 'Usuario' }} · {{ formatFechaHora(c.fecha as string) }}</span>
+                    <p class="historial-com-texto">{{ c.texto }}</p>
+                  </li>
+                </ul>
+                <p v-else class="historial-sin-com">Sin comentarios de tarea en este período.</p>
+              </div>
+            </div>
+          </div>
+          <p v-else class="sin-historial-avances">Aún no hay registros de avance en esta tarea.</p>
         </div>
         <div class="detalle-section">
           <h3>Historial de comentarios</h3>
@@ -1323,7 +1442,9 @@ watch(() => route.query.ver, async () => {
   letter-spacing: 0.03em;
   color: #64748b;
 }
-.table tbody tr:hover { background: #f8fbff; }
+.tareas-panel-table.table-wrapper tbody tr.fila-clic-detalle {
+  cursor: pointer;
+}
 .empty-row td {
   text-align: center;
   color: #64748b;
@@ -1332,15 +1453,114 @@ watch(() => route.query.ver, async () => {
 }
 .page .btn-action,
 .page .btn-action-danger { margin-right: 0.5rem; }
-.avance-cell { min-width: 190px; }
+.table-wrapper th.col-avance,
+.table-wrapper td.avance-cell.col-avance {
+  text-align: center !important;
+}
+.table-wrapper th.col-nombre-tarea {
+  text-align: center !important;
+}
+.table-wrapper td.col-nombre-tarea {
+  text-align: left;
+}
+.table-wrapper th.col-fecha-inicio,
+.table-wrapper td.col-fecha-inicio,
+.table-wrapper td.fechas-cell.col-fecha-inicio,
+.table-wrapper th.col-fecha-fin,
+.table-wrapper td.col-fecha-fin,
+.table-wrapper td.fechas-cell.col-fecha-fin {
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+.table-wrapper th.col-estado,
+.table-wrapper td.col-estado,
+.table-wrapper th.col-prioridad,
+.table-wrapper td.col-prioridad {
+  text-align: center !important;
+  vertical-align: middle !important;
+  display: table-cell !important;
+}
+/* Prioridad más estrecha: libera espacio horizontal para la columna Acciones en pantallas pequeñas */
+.tareas-panel-table.table-wrapper .table th.col-prioridad,
+.tareas-panel-table.table-wrapper .table td.col-prioridad {
+  max-width: 4.85rem;
+  width: 4.25rem;
+  min-width: 3.4rem;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+  box-sizing: border-box;
+}
+.tareas-panel-table.table-wrapper .table td.col-prioridad .prioridad-chip {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+}
+.tareas-panel-table.table-wrapper .col-acciones {
+  min-width: 17rem;
+  width: auto;
+  white-space: nowrap;
+}
+.tareas-panel-table.table-wrapper .table td.actions-cell {
+  display: table-cell !important;
+  vertical-align: middle !important;
+  text-align: center !important;
+  white-space: nowrap;
+}
+.tareas-panel-table.table-wrapper .table td.actions-cell .btn-action,
+.tareas-panel-table.table-wrapper .table td.actions-cell .btn-action-danger {
+  vertical-align: middle;
+}
+/* Botones Acciones: un poco más grandes que la variante extra-compacta anterior */
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-danger,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-warn,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-success {
+  margin-right: 0;
+  margin-left: 0.12rem;
+}
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action:first-child,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-danger:first-child {
+  margin-left: 0;
+}
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-danger,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-warn,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-success {
+  padding: 0.16rem 0.38rem !important;
+  font-size: 0.64rem !important;
+  min-height: 1.52rem !important;
+  gap: 0.2rem !important;
+}
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action.btn-action-compact,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-danger.btn-action-compact {
+  padding: 0.14rem 0.34rem !important;
+  font-size: 0.62rem !important;
+  min-height: 1.45rem !important;
+  margin-right: 0 !important;
+}
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-icon-sm {
+  width: 0.65rem !important;
+  height: 0.65rem !important;
+}
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action.btn-action-compact .btn-icon-sm,
+.tareas-panel-table.table-wrapper .table .actions-cell .btn-action-danger.btn-action-compact .btn-icon-sm {
+  width: 0.6rem !important;
+  height: 0.6rem !important;
+}
+.avance-cell { min-width: 7rem; max-width: 9rem; }
 .progress-inline {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0 auto;
+  max-width: 7.5rem;
 }
 .progress-track {
   flex: 1;
-  height: 10px;
+  min-width: 0;
+  height: 8px;
   border-radius: 999px;
   background: #e2e8f0;
   overflow: hidden;
@@ -1351,11 +1571,24 @@ watch(() => route.query.ver, async () => {
   border-radius: 999px;
 }
 .progress-value {
-  min-width: 2.8rem;
-  font-weight: 700;
+  min-width: 2.35rem;
+  font-weight: 600;
   color: #0f172a;
-  font-size: 0.88rem;
+  font-size: 0.75rem;
 }
+.table-wrapper .col-fecha-inicio,
+.table-wrapper .col-fecha-fin {
+  min-width: 6.5rem;
+  max-width: 8rem;
+  font-size: 0.78rem;
+}
+.fecha-valor {
+  color: #0f172a;
+}
+.table-wrapper td.col-fecha-fin .vencimiento-sin {
+  color: #94a3b8;
+}
+/* Acciones: tamaño compacto solo en este panel (sobrescribe styles.css) */
 .estado-chip,
 .prioridad-chip {
   display: inline-flex;
@@ -1415,7 +1648,8 @@ watch(() => route.query.ver, async () => {
   color: #374151;
   font-size: 0.9rem;
 }
-.col-prioridad {
+/* Columna prioridad en el formulario del modal (no confundir con th/td .col-prioridad de la tabla) */
+.col-prioridad-form {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1460,6 +1694,120 @@ watch(() => route.query.ver, async () => {
   border-top: 1px solid #e2e8f0;
 }
 .detalle-section h3 { font-size: 0.95rem; margin: 0 0 0.5rem; color: #334155; }
+.detalle-historial-avances .historial-leyenda {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin: 0 0 0.65rem;
+  line-height: 1.4;
+}
+.historial-lista-scroll {
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 0.5rem;
+  border: 1px solid #e2e8f0;
+}
+.historial-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem 0.6rem;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.85rem;
+}
+.historial-item:last-child { border-bottom: none; }
+.historial-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+}
+.historial-fecha { color: #64748b; }
+.historial-usuario { color: #475569; font-weight: 500; }
+.historial-valores { font-weight: 700; color: #2563eb; }
+.historial-observaciones {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #3b82f6;
+}
+.historial-obs-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #475569;
+  margin-bottom: 0.35rem;
+}
+.historial-comentario-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #1e293b;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.historial-sin-obs {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+.historial-comentarios-tarea {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: #fafaf9;
+  border: 1px solid #e7e5e4;
+  border-left: 3px solid #78716c;
+}
+.historial-com-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #57534e;
+  margin-bottom: 0.4rem;
+}
+.historial-com-lista {
+  margin: 0;
+  padding-left: 1rem;
+  list-style: disc;
+}
+.historial-com-item { margin-bottom: 0.5rem; }
+.historial-com-item:last-child { margin-bottom: 0; }
+.historial-com-meta {
+  display: block;
+  font-size: 0.72rem;
+  color: #78716c;
+  margin-bottom: 0.2rem;
+}
+.historial-com-texto {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #292524;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.historial-sin-com {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #a8a29e;
+  font-style: italic;
+}
+.historial-item-cierre { background: linear-gradient(90deg, rgba(34, 197, 94, 0.08), transparent); border-radius: 6px; }
+.historial-badge-cierre {
+  width: 100%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #15803d;
+  margin-bottom: 0.15rem;
+}
+.sin-historial-avances { font-size: 0.88rem; color: #94a3b8; font-style: italic; margin: 0; }
 .comentario-leyenda { font-size: 0.75rem; color: #94a3b8; margin: 0 0 0.5rem; }
 .comentarios-lista { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.5rem; }
 .comentario-item { padding: 0.5rem; background: #f8fafc; border-radius: 6px; }
@@ -1491,6 +1839,9 @@ watch(() => route.query.ver, async () => {
 
 /* Subtareas jerárquicas */
 .row-subtarea { background-color: rgba(248, 250, 252, 0.8); }
+.table-wrapper tbody tr.row-subtarea:hover {
+  background: linear-gradient(rgba(226, 235, 248, 0.4), rgba(226, 235, 248, 0.4)), rgba(248, 250, 252, 0.95) !important;
+}
 .cell-indent { padding-left: 2rem !important; }
 .subtarea-icon { color: #64748b; margin-right: 0.35rem; font-size: 0.9rem; }
 

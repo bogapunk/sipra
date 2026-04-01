@@ -193,9 +193,9 @@ onMounted(load)
           <td>{{ r.nombre }}</td>
           <td>{{ r.descripcion }}</td>
           <td class="actions-cell">
-            <button class="btn-action" title="Ver" @click="openVer(r)"><IconEye class="btn-icon-sm" /> Ver</button>
-            <button class="btn-action" title="Editar" @click="openEdit(r)"><IconEdit class="btn-icon-sm" /> Editar</button>
-            <button class="btn-action-danger" title="Eliminar" @click="remove(r.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
+            <button type="button" class="btn-action btn-action-ver" title="Ver" @click="openVer(r)"><IconEye class="btn-icon-sm" /> Ver</button>
+            <button type="button" class="btn-action btn-action-editar" title="Editar" @click="openEdit(r)"><IconEdit class="btn-icon-sm" /> Editar</button>
+            <button type="button" class="btn-action-danger" title="Eliminar" @click="remove(r.id as number)"><IconTrash class="btn-icon-sm" /> Eliminar</button>
           </td>
         </tr>
       </tbody>

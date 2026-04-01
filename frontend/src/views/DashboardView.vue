@@ -984,7 +984,7 @@ const resumenCarga = computed(() => {
                 <tr>
                   <th>Proyecto</th>
                   <th>Responsable</th>
-                  <th>Avance</th>
+                  <th class="col-avance">Avance</th>
                   <th>Situacion</th>
                   <th></th>
                 </tr>
@@ -996,7 +996,7 @@ const resumenCarga = computed(() => {
                     <small>{{ item.secretaria_nombre }}</small>
                   </td>
                   <td>{{ item.responsable_nombre }}</td>
-                  <td>{{ formatPercent(item.porcentaje_avance) }}</td>
+                  <td class="col-avance">{{ formatPercent(item.porcentaje_avance) }}</td>
                   <td>
                     <span class="status-badge status-danger">
                       {{ item.tareas_bloqueadas ? `${item.tareas_bloqueadas} bloqueada(s)` : resumenRiesgoDias(item.dias_atraso) }}
@@ -1078,7 +1078,7 @@ const resumenCarga = computed(() => {
               <thead>
                 <tr>
                   <th>Proyecto</th>
-                  <th>Avance</th>
+                  <th class="col-avance">Avance</th>
                   <th>Estado</th>
                   <th></th>
                 </tr>
@@ -1086,7 +1086,7 @@ const resumenCarga = computed(() => {
               <tbody>
                 <tr v-for="item in resumenCarga.aCargo" :key="String(item.id)">
                   <td>{{ item.nombre }}</td>
-                  <td>{{ formatPercent(Number(item.porcentaje_avance || 0)) }}</td>
+                  <td class="col-avance">{{ formatPercent(Number(item.porcentaje_avance || 0)) }}</td>
                   <td>{{ item.estado || '-' }}</td>
                   <td>
                     <button type="button" class="link-button" @click="router.push(`/proyectos/${item.id}`)">Ver detalle</button>
@@ -1110,7 +1110,7 @@ const resumenCarga = computed(() => {
               <thead>
                 <tr>
                   <th>Tarea</th>
-                  <th>Avance</th>
+                  <th class="col-avance">Avance</th>
                   <th>Estado</th>
                   <th></th>
                 </tr>
@@ -1118,7 +1118,7 @@ const resumenCarga = computed(() => {
               <tbody>
                 <tr v-for="item in resumenCarga.tareasParticulares" :key="String(item.id)">
                   <td>{{ item.titulo }}</td>
-                  <td>{{ formatPercent(Number(item.porcentaje_avance || 0)) }}</td>
+                  <td class="col-avance">{{ formatPercent(Number(item.porcentaje_avance || 0)) }}</td>
                   <td>{{ item.estado || '-' }}</td>
                   <td>
                     <button type="button" class="link-button" @click="abrirDetalleTareaModal(Number(item.id))">Ver detalle</button>
@@ -1448,6 +1448,10 @@ th {
   text-transform: uppercase;
   letter-spacing: 0.02em;
   color: #64748b;
+}
+.table-shell th.col-avance,
+.table-shell td.col-avance {
+  text-align: center;
 }
 td strong {
   display: block;

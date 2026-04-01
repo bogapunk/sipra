@@ -84,16 +84,6 @@ class Command(BaseCommand):
         carga_rol = Rol.objects.get(nombre='Carga')
         vis_rol = Rol.objects.get(nombre='Visualización')
 
-        Usuario.objects.get_or_create(
-            email='admin@admin.com',
-            defaults={
-                'nombre': 'Admin',
-                'apellido': 'Sistema',
-                'password': 'admin123',
-                'rol': admin_rol,
-                'estado': True,
-            }
-        )
         areas_data = ['Presidencia', 'Desarrollo', 'Infraestructura', 'Comunicación', 'Recursos Humanos']
         areas_objs = []
         for nombre in areas_data:
@@ -109,7 +99,17 @@ class Command(BaseCommand):
             nombre=self._env('BOOTSTRAP_ADMIN_NOMBRE', 'Administrador'),
             apellido=self._env('BOOTSTRAP_ADMIN_APELLIDO', 'SIPRA'),
             rol=admin_rol,
+            area=area_presidencia,
         )
+        if area_presidencia:
+            self._ensure_bootstrap_user(
+                email='admin@admin.com',
+                password='admin123',
+                nombre='Admin',
+                apellido='Sistema',
+                rol=admin_rol,
+                area=area_presidencia,
+            )
         vis_user, _ = self._ensure_bootstrap_user(
             email=self._env('BOOTSTRAP_VISUALIZADOR_EMAIL', 'visualizacion@sipra.local').lower(),
             password=self._env('BOOTSTRAP_VISUALIZADOR_PASSWORD', 'VisualSipra2026!'),

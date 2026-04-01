@@ -1,17 +1,17 @@
 from datetime import timedelta
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 from .models import (
     Eje, Plan, Programa, ObjetivoEstrategico, Indicador,
-    Proyecto, ProyectoArea, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto,
+    Proyecto, ProyectoArea, ProyectoSecretaria, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto,
     ComentarioAuditLog, AdjuntoAuditLog,
 )
 from .serializers import (
     EjeSerializer, PlanSerializer, ProgramaSerializer,
     ObjetivoEstrategicoSerializer, IndicadorSerializer,
-    ProyectoSerializer, ProyectoAreaSerializer, ProyectoEquipoSerializer,
+    ProyectoSerializer, ProyectoAreaSerializer, ProyectoSecretariaSerializer, ProyectoEquipoSerializer,
     EtapaSerializer, ComentarioProyectoSerializer, AdjuntoProyectoSerializer,
     ComentarioAuditLogSerializer, AdjuntoAuditLogSerializer,
 )
@@ -19,6 +19,7 @@ from users.access import (
     ROL_ADMIN,
     ROL_CARGA,
     ROL_VISUALIZACION,
+    dedupe_queryset_by_pk,
     ensure_project_assignment_allowed,
     ensure_read_only_for_roles,
     filter_projects_for_user,
@@ -44,6 +45,39 @@ def _ensure_project_access(request):
         write_roles=(ROL_ADMIN, ROL_CARGA),
         message='No tiene permisos para gestionar proyectos.',
     )
+
+
+def _effective_assignment_ids_for_perm(serializer):
+    """Listas de ids de áreas y secretarías según el payload o el estado actual (para permisos de Carga)."""
+    vd = serializer.validated_data
+    inst = serializer.instance
+    if 'areas_ids' in vd:
+        return list(vd['areas_ids']), []
+    if 'secretarias_ids' in vd:
+        return [], list(vd['secretarias_ids'])
+    if inst is None:
+        a = vd.get('area')
+        s = vd.get('secretaria')
+        return ([a.id] if a else []), ([s.id] if s else [])
+    if 'area' in vd or 'secretaria' in vd:
+        a = vd.get('area', inst.area)
+        s = vd.get('secretaria', inst.secretaria)
+        if a:
+            return [a.id], []
+        if s:
+            return [], [s.id]
+        return [], []
+    ids_a = set()
+    ids_s = set()
+    if inst.area_id:
+        ids_a.add(inst.area_id)
+    for pa in inst.proyectoarea_set.all():
+        ids_a.add(pa.area_id)
+    if inst.secretaria_id:
+        ids_s.add(inst.secretaria_id)
+    for ps in inst.proyectosecretaria_set.all():
+        ids_s.add(ps.secretaria_id)
+    return sorted(ids_a), sorted(ids_s)
 
 
 def _ensure_project_collaboration_access(request):
@@ -152,6 +186,14 @@ class ProyectoViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         """Elimina en orden para evitar IntegrityError con Tarea->Etapa->Proyecto."""
+        from rest_framework.exceptions import ValidationError
+        from .dependencias import proyecto_tiene_multiples_dependencias
+        if proyecto_tiene_multiples_dependencias(instance):
+            raise ValidationError(
+                'No se puede eliminar el proyecto desde el listado porque está vinculado a más de un área '
+                'o más de una secretaría. Gestione cada asignación desde el detalle del proyecto o desde '
+                'el panel de asignaciones, o use el listado filtrado por área o secretaría.'
+            )
         from django.db import transaction
         from tasks.models import HistorialTarea
         with transaction.atomic():
@@ -165,6 +207,7 @@ class ProyectoViewSet(viewsets.ModelViewSet):
             instance.comentarios.all().delete()
             instance.adjuntos.all().delete()
             instance.proyectoarea_set.all().delete()
+            instance.proyectosecretaria_set.all().delete()
             instance.equipo.all().delete()
             # 3. Proyecto
             instance.delete()
@@ -175,35 +218,64 @@ class ProyectoViewSet(viewsets.ModelViewSet):
         ).prefetch_related(
             Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario')),
             Prefetch('presupuesto_items', queryset=ProyectoPresupuestoItem.objects.order_by('orden', 'id')),
-            'proyectoarea_set__area',
+            'proyectoarea__area',
+            'proyectosecretaria_set__secretaria',
         ).order_by('id')
         secretaria_id = self.request.query_params.get('secretaria')
         area_id = self.request.query_params.get('area')
         if secretaria_id:
-            qs = qs.filter(secretaria_id=secretaria_id)
+            qs = dedupe_queryset_by_pk(
+                qs.filter(
+                    Q(secretaria_id=secretaria_id) | Q(proyectosecretaria_set__secretaria_id=secretaria_id)
+                )
+            )
         if area_id:
-            qs = qs.filter(area_id=area_id)
-        return filter_projects_for_user(qs, self.request.user)
+            qs = dedupe_queryset_by_pk(
+                qs.filter(Q(area_id=area_id) | Q(proyectoarea__area_id=area_id))
+            )
+        qs = filter_projects_for_user(qs, self.request.user)
+        estado = self.request.query_params.get('estado')
+        search = (self.request.query_params.get('search') or self.request.query_params.get('q') or '').strip()
+        vencimiento = self.request.query_params.get('vencimiento')
+        if estado:
+            qs = qs.filter(estado=estado)
+        if search:
+            from .search import aplicar_busqueda_proyectos
+            qs = aplicar_busqueda_proyectos(qs, search)
+        if vencimiento:
+            hoy = timezone.now().date()
+            limite = hoy + timedelta(days=7)
+            if vencimiento == 'vencidos':
+                qs = qs.exclude(estado='Finalizado').filter(fecha_fin_estimada__lt=hoy)
+            elif vencimiento == 'proximos':
+                qs = qs.exclude(estado='Finalizado').filter(
+                    fecha_fin_estimada__gte=hoy,
+                    fecha_fin_estimada__lte=limite,
+                )
+            elif vencimiento == 'en-plazo':
+                qs = qs.exclude(estado='Finalizado').filter(fecha_fin_estimada__gt=limite)
+        from .querysets import proyecto_viewset_list_qs
+        return proyecto_viewset_list_qs(qs)
 
     def perform_create(self, serializer):
-        data = serializer.validated_data
+        eff_a, eff_s = _effective_assignment_ids_for_perm(serializer)
+        ur = serializer.validated_data.get('usuario_responsable')
         ensure_project_assignment_allowed(
             self.request.user,
-            area_id=getattr(data.get('area'), 'id', None),
-            secretaria_id=getattr(data.get('secretaria'), 'id', None),
-            usuario_responsable_id=getattr(data.get('usuario_responsable'), 'id', None),
+            area_ids=eff_a,
+            secretaria_ids=eff_s,
+            usuario_responsable_id=getattr(ur, 'id', None) if ur else None,
         )
         serializer.save(creado_por=self.request.user)
 
     def perform_update(self, serializer):
-        data = serializer.validated_data
+        eff_a, eff_s = _effective_assignment_ids_for_perm(serializer)
+        ur = serializer.validated_data.get('usuario_responsable', serializer.instance.usuario_responsable)
         ensure_project_assignment_allowed(
             self.request.user,
-            area_id=getattr(data.get('area', serializer.instance.area), 'id', None),
-            secretaria_id=getattr(data.get('secretaria', serializer.instance.secretaria), 'id', None),
-            usuario_responsable_id=getattr(
-                data.get('usuario_responsable', serializer.instance.usuario_responsable), 'id', None
-            ),
+            area_ids=eff_a,
+            secretaria_ids=eff_s,
+            usuario_responsable_id=getattr(ur, 'id', None) if ur else None,
         )
         serializer.save(creado_por=serializer.instance.creado_por)
 
@@ -261,6 +333,34 @@ class ProyectoAreaViewSet(viewsets.ModelViewSet):
         proyecto = serializer.validated_data.get('proyecto', serializer.instance.proyecto)
         if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
             raise PermissionDenied('No tiene acceso al proyecto donde intenta asignar un área.')
+        serializer.save()
+
+
+class ProyectoSecretariaViewSet(viewsets.ModelViewSet):
+    queryset = ProyectoSecretaria.objects.select_related('proyecto', 'secretaria')
+    serializer_class = ProyectoSecretariaSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        _ensure_project_access(request)
+
+    def get_queryset(self):
+        qs = ProyectoSecretaria.objects.select_related('proyecto', 'secretaria')
+        proyecto = self.request.query_params.get('proyecto')
+        if proyecto:
+            qs = qs.filter(proyecto_id=proyecto)
+        return qs.filter(proyecto_id__in=filter_projects_for_user(Proyecto.objects.all(), self.request.user).values('id'))
+
+    def perform_create(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto')
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta asignar una secretaría.')
+        serializer.save()
+
+    def perform_update(self, serializer):
+        proyecto = serializer.validated_data.get('proyecto', serializer.instance.proyecto)
+        if not filter_projects_for_user(Proyecto.objects.filter(id=proyecto.id), self.request.user).exists():
+            raise PermissionDenied('No tiene acceso al proyecto donde intenta asignar una secretaría.')
         serializer.save()
 
 

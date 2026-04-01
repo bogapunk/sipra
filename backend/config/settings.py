@@ -163,13 +163,35 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
 
-# Logging (consola + archivo rotativo)
+# Logging (consola + archivo rotativo opcional)
 LOG_LEVEL = _env_str('LOG_LEVEL', 'DEBUG' if DEBUG else 'INFO').upper()
 LOG_DIR = Path(_env_str('LOG_DIR', str(BASE_DIR / 'logs')))
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_ENABLE_FILE = _env_bool('LOG_ENABLE_FILE', True)
 LOG_FILE = LOG_DIR / _env_str('LOG_FILE_NAME', 'sipra.log')
 LOG_MAX_BYTES = int(_env_str('LOG_MAX_BYTES', str(10 * 1024 * 1024)))
 LOG_BACKUP_COUNT = int(_env_str('LOG_BACKUP_COUNT', '10'))
+
+if LOG_ENABLE_FILE:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+_log_handlers = ['console', 'file'] if LOG_ENABLE_FILE else ['console']
+_handlers: dict = {
+    'console': {
+        'class': 'logging.StreamHandler',
+        'formatter': 'standard',
+        'level': LOG_LEVEL,
+    },
+}
+if LOG_ENABLE_FILE:
+    _handlers['file'] = {
+        'class': 'config.logging_handlers.WindowsSafeRotatingFileHandler',
+        'filename': str(LOG_FILE),
+        'maxBytes': LOG_MAX_BYTES,
+        'backupCount': LOG_BACKUP_COUNT,
+        'formatter': 'standard',
+        'level': LOG_LEVEL,
+        'encoding': 'utf-8',
+    }
 
 LOGGING = {
     'version': 1,
@@ -180,35 +202,32 @@ LOGGING = {
             'style': '{',
         },
     },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'standard',
-            'level': LOG_LEVEL,
-        },
-        'file': {
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': str(LOG_FILE),
-            'maxBytes': LOG_MAX_BYTES,
-            'backupCount': LOG_BACKUP_COUNT,
-            'formatter': 'standard',
-            'level': LOG_LEVEL,
-            'encoding': 'utf-8',
-        },
-    },
+    'handlers': _handlers,
     'root': {
-        'handlers': ['console', 'file'],
+        'handlers': _log_handlers,
         'level': LOG_LEVEL,
     },
     'loggers': {
         'django': {
-            'handlers': ['console', 'file'],
+            'handlers': _log_handlers,
             'level': LOG_LEVEL,
             'propagate': False,
         },
         'django.request': {
-            'handlers': ['console', 'file'],
+            'handlers': _log_handlers,
             'level': 'WARNING',
+            'propagate': False,
+        },
+        # Evita miles de líneas "File ... first seen with mtime" en runserver (no son errores).
+        'django.utils.autoreload': {
+            'handlers': _log_handlers,
+            'level': 'INFO',
+            'propagate': False,
+        },
+        # Cada consulta SQL en DEBUG llena sipra.log y fuerza rotación (problemática en Windows).
+        'django.db.backends': {
+            'handlers': _log_handlers,
+            'level': 'INFO',
             'propagate': False,
         },
     },

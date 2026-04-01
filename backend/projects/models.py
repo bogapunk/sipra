@@ -2,6 +2,8 @@ from django.db import models
 from users.models import Usuario
 from areas.models import Area
 
+_proyecto_presupuesto_identity_cache = None
+
 
 class Eje(models.Model):
     """Eje estratégico de la planificación 2026."""
@@ -116,6 +118,8 @@ class Proyecto(models.Model):
         'secretarias.Secretaria', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='proyectos'
     )
+    # Transversal: varias áreas o varias secretarías; Carga ve tareas solo por asignación en cada tarea (+ coordinadores).
+    es_transversal = models.BooleanField(default=False, db_index=True)
 
     def clean(self):
         from django.core.exceptions import ValidationError
@@ -181,8 +185,38 @@ class ProyectoPresupuestoItem(models.Model):
             ),
         ]
 
+    def save(self, *args, **kwargs):
+        """SQL Server: bases sin IDENTITY en `id` fallan al insertar; solo entonces se asigna PK manual."""
+        from django.db import connection
+        if self._state.adding and self.pk is None and connection.vendor == 'microsoft':
+            if not proyecto_presupuesto_item_id_is_identity(connection, self.__class__):
+                from django.db.models import Max
+                max_id = self.__class__.objects.aggregate(m=Max('id'))['m']
+                self.pk = (max_id or 0) + 1
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.proyecto_id} - {self.categoria_gasto}"
+
+
+def proyecto_presupuesto_item_id_is_identity(connection, model_cls):
+    """True si la columna id tiene IDENTITY (comportamiento normal de BigAutoField)."""
+    global _proyecto_presupuesto_identity_cache
+    if connection.vendor != 'microsoft':
+        return True
+    if _proyecto_presupuesto_identity_cache is not None:
+        return _proyecto_presupuesto_identity_cache
+    table = model_cls._meta.db_table
+    qualified = table if '.' in table else f'dbo.{table}'
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT COLUMNPROPERTY(OBJECT_ID(%s), 'id', 'IsIdentity')",
+            [qualified],
+        )
+        row = cursor.fetchone()
+        val = row[0] if row else None
+    _proyecto_presupuesto_identity_cache = val == 1
+    return _proyecto_presupuesto_identity_cache
 
 
 class Indicador(models.Model):
@@ -208,6 +242,22 @@ class ProyectoArea(models.Model):
 
     class Meta:
         unique_together = ("proyecto", "area")
+
+
+class ProyectoSecretaria(models.Model):
+    """Vínculo proyecto–secretaría para proyectos con varias secretarías (p. ej. transversales)."""
+    proyecto = models.ForeignKey(
+        Proyecto, on_delete=models.CASCADE, related_name='proyectosecretaria_set', db_constraint=False
+    )
+    secretaria = models.ForeignKey(
+        'secretarias.Secretaria',
+        on_delete=models.CASCADE,
+        related_name='proyectos_vinculados',
+        db_constraint=False,
+    )
+
+    class Meta:
+        unique_together = ("proyecto", "secretaria")
 
 
 class ProyectoEquipo(models.Model):
