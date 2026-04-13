@@ -888,7 +888,7 @@ watch(() => route.query.editar, async () => {
           <th class="col-nombre-tarea">Tarea</th>
           <th>Padre</th>
           <th>Área / Secretaría</th>
-          <th>Usuario</th>
+          <th class="col-usuario">Usuario</th>
           <th class="col-estado">Estado</th>
           <th class="col-avance">Avance</th>
           <th class="col-prioridad">Prioridad</th>
@@ -914,7 +914,7 @@ watch(() => route.query.editar, async () => {
           </td>
           <td>{{ item.esSubtarea ? (item.tarea.tarea_padre_nombre || '-') : '—' }}</td>
           <td>{{ item.tarea.organizacion_nombre || item.tarea.area_nombre || item.tarea.secretaria_nombre || '-' }}</td>
-          <td>{{ item.tarea.responsable_nombre || '-' }}</td>
+          <td class="col-usuario">{{ item.tarea.responsable_nombre || '-' }}</td>
           <td class="col-estado">
             <span class="estado-chip" :class="estadoTareaClase(item.tarea.estado)">{{ item.tarea.estado }}</span>
           </td>
@@ -1497,7 +1497,7 @@ watch(() => route.query.editar, async () => {
   font-size: 0.72rem;
 }
 .tareas-panel-table.table-wrapper .col-acciones {
-  min-width: 17rem;
+  min-width: 16rem;
   width: auto;
   white-space: nowrap;
 }
@@ -1548,7 +1548,17 @@ watch(() => route.query.editar, async () => {
   width: 0.6rem !important;
   height: 0.6rem !important;
 }
-.avance-cell { min-width: 7rem; max-width: 9rem; }
+.table-wrapper .col-usuario {
+  width: 8rem;
+  min-width: 7.25rem;
+  max-width: 8.5rem;
+}
+.table-wrapper td.col-usuario {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.avance-cell { min-width: 6.2rem; max-width: 7.2rem; }
 .progress-inline {
   display: flex;
   align-items: center;
@@ -1578,7 +1588,7 @@ watch(() => route.query.editar, async () => {
 }
 .table-wrapper .col-fecha-inicio,
 .table-wrapper .col-fecha-fin {
-  min-width: 6.5rem;
+  min-width: 7rem;
   max-width: 8rem;
   font-size: 0.78rem;
 }
