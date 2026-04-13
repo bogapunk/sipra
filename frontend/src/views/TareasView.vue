@@ -887,8 +887,8 @@ watch(() => route.query.editar, async () => {
         <tr>
           <th class="col-nombre-tarea">Tarea</th>
           <th>Padre</th>
-          <th>Área / Secretaría</th>
-          <th class="col-usuario">Usuario</th>
+          <th class="col-organizacion">Área / Secretaría</th>
+          <th class="col-usuario">Responsable</th>
           <th class="col-estado">Estado</th>
           <th class="col-avance">Avance</th>
           <th class="col-prioridad">Prioridad</th>
@@ -1455,6 +1455,10 @@ watch(() => route.query.editar, async () => {
 .page .btn-action-danger { margin-right: 0.5rem; }
 .table-wrapper th.col-avance,
 .table-wrapper td.avance-cell.col-avance {
+  text-align: center !important;
+}
+.table-wrapper th.col-organizacion,
+.table-wrapper th.col-usuario {
   text-align: center !important;
 }
 .table-wrapper th.col-nombre-tarea {

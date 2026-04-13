@@ -906,7 +906,7 @@ watch(buscarProyecto, () => {
           <tr>
             <th v-if="hayTransversalEnLista" class="col-expand" title="Expandir tareas del proyecto transversal" />
             <th class="col-nombre-proyecto" title="Nombre del proyecto">Proyecto</th>
-            <th class="col-dep" title="Dependencia organizacional">Dep. org.</th>
+            <th class="col-dep" title="Dependencia organizacional">Área / Secretaría</th>
             <th class="col-avance">Avance</th>
             <th>Responsable</th>
             <th class="col-estado">Estado</th>
@@ -1658,6 +1658,9 @@ watch(buscarProyecto, () => {
 .table-wrapper .col-dep {
   width: 14%;
   max-width: 11rem;
+}
+.table-wrapper th.col-dep {
+  text-align: center !important;
 }
 .dependencia-cell {
   min-width: 0;
