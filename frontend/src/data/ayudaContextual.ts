@@ -9,13 +9,14 @@ export interface AyudaSeccion {
 export const ayudaPorRuta: Record<string, AyudaSeccion> = {
   '/dashboard': {
     titulo: 'Dashboard',
-    descripcion: 'Vista general del sistema con resumen de proyectos y avances. Muestra tarjetas con métricas clave y lista de proyectos.',
+    descripcion: 'Vista general del sistema: métricas clave, gráficos dinámicos, panel "Estado de los objetivos" (totales, no iniciados, en progreso, finalizados y avance por proyecto) y proyectos en riesgo.',
     pasos: [
       'Revise las tarjetas superiores para el estado global.',
-      'Haga clic en un proyecto para ver su detalle.',
-      'Use "Reasignar" para cambiar áreas o responsables del proyecto.',
+      'Consulte el panel de objetivos: dona de avance y barras por proyecto.',
+      'Haga clic en un gráfico o proyecto para ir al detalle filtrado.',
+      'Use "Exportar resumen" para generar un Excel con gráficos y objetivos.',
     ],
-    consejos: ['El avance por proyecto se calcula automáticamente desde las tareas asociadas.'],
+    consejos: ['El avance por tareas y el avance de objetivos son métricas distintas y complementarias.'],
   },
   '/proyectos': {
     titulo: 'Proyectos',
@@ -99,13 +100,14 @@ export const ayudaPorRuta: Record<string, AyudaSeccion> = {
   },
   '/planificacion': {
     titulo: 'Planificación',
-    descripcion: 'Estructura jerárquica: Ejes → Planes → Programas → Objetivos → Proyectos → Indicadores.',
+    descripcion: 'Estructura jerárquica: Ejes → Planes → Programas → Objetivos → Proyectos → Indicadores. Incluye selector de año e importación masiva desde Excel/CSV.',
     pasos: [
-      'Navegue por las pestañas (Ejes, Planes, Programas, Objetivos, Indicadores).',
-      'Cree y edite elementos según la jerarquía.',
+      'Elija el año con el selector (por defecto 2026).',
+      'Navegue el árbol; cada proyecto muestra su avance de tareas y de objetivos.',
+      'Para cargar varios registros, descargue la plantilla e impórtela.',
       'Vincule proyectos a objetivos estratégicos.',
     ],
-    consejos: ['La estructura define la alineación estratégica de los proyectos.'],
+    consejos: ['La importación masiva está bloqueada para 2026 (datos ya cargados); úsela en otros años.'],
   },
   '/cargar': {
     titulo: 'Cargar Avances',
@@ -125,12 +127,14 @@ export function obtenerAyuda(ruta: string): AyudaSeccion | null {
   if (ruta.startsWith('/proyectos/') && !ruta.includes('/reasignar')) {
     return {
       titulo: 'Detalle de proyecto',
-      descripcion: 'Vista detallada del proyecto con etapas, avance y gráfica de evolución.',
+      descripcion: 'Vista detallada: avance de tareas y de objetivos, objetivos y sus estados, presupuesto, indicadores, etapas, tareas y gráfica de evolución.',
       pasos: [
-        'Agregue etapas para desglosar el proyecto.',
-        'El avance se calcula desde las tareas asociadas.',
+        'Revise el avance de tareas y el avance de objetivos (gráficos).',
+        'Consulte objetivos, presupuesto, indicadores y tareas.',
+        'Use "Exportar a Excel" para un reporte completo con gráficos.',
         'Use "Reasignar" para cambiar áreas o responsables.',
       ],
+      consejos: ['La exportación incluye una hoja de gráficos: avance, objetivos por estado y semáforo de vencimientos.'],
     }
   }
   if (ruta.includes('/reasignar')) {

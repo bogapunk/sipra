@@ -1,10 +1,13 @@
 from datetime import timedelta
+import time
 from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework import viewsets
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied, NotFound
 from .models import (
-    Eje, Plan, Programa, ObjetivoEstrategico, Indicador,
+    Eje, Plan, Programa, ObjetivoEstrategico, Indicador, ProyectoObjetivo,
     Proyecto, ProyectoArea, ProyectoSecretaria, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto,
     ComentarioAuditLog, AdjuntoAuditLog,
 )
@@ -23,6 +26,7 @@ from users.access import (
     ensure_project_assignment_allowed,
     ensure_read_only_for_roles,
     filter_projects_for_user,
+    filter_tasks_for_user,
     require_roles,
 )
 
@@ -98,6 +102,16 @@ class EjeViewSet(viewsets.ModelViewSet):
         super().initial(request, *args, **kwargs)
         _ensure_catalog_access(request)
 
+    def get_queryset(self):
+        qs = Eje.objects.all()
+        anio = self.request.query_params.get('anio')
+        if anio:
+            try:
+                qs = qs.filter(anio=int(anio))
+            except (TypeError, ValueError):
+                pass
+        return qs
+
 
 class PlanViewSet(viewsets.ModelViewSet):
     queryset = Plan.objects.select_related('eje').all()
@@ -112,6 +126,12 @@ class PlanViewSet(viewsets.ModelViewSet):
         eje = self.request.query_params.get('eje')
         if eje:
             qs = qs.filter(eje_id=eje)
+        anio = self.request.query_params.get('anio')
+        if anio:
+            try:
+                qs = qs.filter(eje__anio=int(anio))
+            except (TypeError, ValueError):
+                pass
         return qs
 
 
@@ -124,10 +144,16 @@ class ProgramaViewSet(viewsets.ModelViewSet):
         _ensure_catalog_access(request)
 
     def get_queryset(self):
-        qs = Programa.objects.select_related('plan').all()
+        qs = Programa.objects.select_related('plan', 'plan__eje').all()
         plan = self.request.query_params.get('plan')
         if plan:
             qs = qs.filter(plan_id=plan)
+        anio = self.request.query_params.get('anio')
+        if anio:
+            try:
+                qs = qs.filter(plan__eje__anio=int(anio))
+            except (TypeError, ValueError):
+                pass
         return qs
 
 
@@ -140,10 +166,16 @@ class ObjetivoEstrategicoViewSet(viewsets.ModelViewSet):
         _ensure_catalog_access(request)
 
     def get_queryset(self):
-        qs = ObjetivoEstrategico.objects.select_related('programa').all()
+        qs = ObjetivoEstrategico.objects.select_related('programa', 'programa__plan__eje').all()
         programa = self.request.query_params.get('programa')
         if programa:
             qs = qs.filter(programa_id=programa)
+        anio = self.request.query_params.get('anio')
+        if anio:
+            try:
+                qs = qs.filter(programa__plan__eje__anio=int(anio))
+            except (TypeError, ValueError):
+                pass
         return qs
 
 
@@ -169,6 +201,10 @@ class ProyectoViewSet(viewsets.ModelViewSet):
     ).prefetch_related(
         Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario')),
         Prefetch('presupuesto_items', queryset=ProyectoPresupuestoItem.objects.order_by('orden', 'id')),
+        Prefetch(
+            'objetivos_proyecto',
+            queryset=ProyectoObjetivo.objects.select_related('objetivo__programa').order_by('id'),
+        ),
     ).order_by('id')
     serializer_class = ProyectoSerializer
 
@@ -220,6 +256,10 @@ class ProyectoViewSet(viewsets.ModelViewSet):
             Prefetch('presupuesto_items', queryset=ProyectoPresupuestoItem.objects.order_by('orden', 'id')),
             'proyectoarea__area',
             'proyectosecretaria_set__secretaria',
+            Prefetch(
+                'objetivos_proyecto',
+                queryset=ProyectoObjetivo.objects.select_related('objetivo__programa').order_by('id'),
+            ),
         ).order_by('id')
         secretaria_id = self.request.query_params.get('secretaria')
         area_id = self.request.query_params.get('area')
@@ -278,6 +318,113 @@ class ProyectoViewSet(viewsets.ModelViewSet):
             usuario_responsable_id=getattr(ur, 'id', None) if ur else None,
         )
         serializer.save(creado_por=serializer.instance.creado_por)
+
+    def _dependencias_proyecto(self, proyecto):
+        areas = []
+        secretarias = []
+        areas_vistas = set()
+        secs_vistas = set()
+        if proyecto.area_id and proyecto.area:
+            areas.append({'id': proyecto.area_id, 'nombre': proyecto.area.nombre})
+            areas_vistas.add(proyecto.area_id)
+        for pa in proyecto.proyectoarea_set.all():
+            if pa.area_id and pa.area_id not in areas_vistas and pa.area:
+                areas.append({'id': pa.area_id, 'nombre': pa.area.nombre})
+                areas_vistas.add(pa.area_id)
+        if proyecto.secretaria_id and proyecto.secretaria:
+            sec = proyecto.secretaria
+            codigo = getattr(sec, 'codigo', '') or ''
+            nombre = getattr(sec, 'nombre', '') or ''
+            label = f'{codigo} — {nombre}'.strip(' — ') if codigo or nombre else f'Secretaría {proyecto.secretaria_id}'
+            secretarias.append({'id': proyecto.secretaria_id, 'nombre': label})
+            secs_vistas.add(proyecto.secretaria_id)
+        for ps in proyecto.proyectosecretaria_set.all():
+            if ps.secretaria_id and ps.secretaria_id not in secs_vistas and ps.secretaria:
+                sec = ps.secretaria
+                codigo = getattr(sec, 'codigo', '') or ''
+                nombre = getattr(sec, 'nombre', '') or ''
+                label = f'{codigo} — {nombre}'.strip(' — ') if codigo or nombre else f'Secretaría {ps.secretaria_id}'
+                secretarias.append({'id': ps.secretaria_id, 'nombre': label})
+                secs_vistas.add(ps.secretaria_id)
+        return {'areas': areas, 'secretarias': secretarias}
+
+    @action(detail=True, methods=['get'], url_path='vista-detalle')
+    def vista_detalle(self, request, pk=None):
+        """
+        Payload agregado para la vista de detalle de proyecto (1 request).
+        Query ?solo=tareas devuelve únicamente tareas + metadatos de rendimiento.
+        """
+        from tasks.models import Tarea
+        from tasks.serializers import TareaListSerializer
+
+        timings = {}
+        t_inicio = time.perf_counter()
+        solo_tareas = request.query_params.get('solo') == 'tareas'
+
+        if not solo_tareas:
+            t0 = time.perf_counter()
+            proyecto_qs = filter_projects_for_user(
+                Proyecto.objects.filter(pk=pk)
+                .select_related(
+                    'usuario_responsable', 'area', 'secretaria', 'creado_por',
+                    'programa', 'objetivo_estrategico',
+                )
+                .prefetch_related(
+                    Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario')),
+                    Prefetch(
+                        'presupuesto_items',
+                        queryset=ProyectoPresupuestoItem.objects.order_by('orden', 'id'),
+                    ),
+                    Prefetch(
+                        'objetivos_proyecto',
+                        queryset=ProyectoObjetivo.objects.select_related('objetivo__programa').order_by('id'),
+                    ),
+                    Prefetch('proyectoarea_set', queryset=ProyectoArea.objects.select_related('area')),
+                    Prefetch(
+                        'proyectosecretaria_set',
+                        queryset=ProyectoSecretaria.objects.select_related('secretaria'),
+                    ),
+                ),
+                request.user,
+            )
+            proyecto = proyecto_qs.first()
+            if not proyecto:
+                raise NotFound('Proyecto no encontrado.')
+            timings['proyecto_ms'] = round((time.perf_counter() - t0) * 1000, 2)
+
+        t1 = time.perf_counter()
+        tareas_qs = filter_tasks_for_user(
+            Tarea.objects.filter(proyecto_id=pk).select_related(
+                'area', 'secretaria', 'proyecto', 'responsable', 'tarea_padre'
+            ),
+            request.user,
+        ).order_by('tarea_padre_id', 'orden', 'id')
+        tareas_data = TareaListSerializer(tareas_qs, many=True).data
+        timings['tareas_ms'] = round((time.perf_counter() - t1) * 1000, 2)
+
+        if solo_tareas:
+            timings['total_ms'] = round((time.perf_counter() - t_inicio) * 1000, 2)
+            return Response({
+                'tareas': tareas_data,
+                '_rendimiento': timings,
+            })
+
+        t2 = time.perf_counter()
+        etapas = Etapa.objects.filter(proyecto_id=pk).order_by('orden', 'id')
+        indicadores = Indicador.objects.filter(proyecto_id=pk).order_by('id')
+        adjuntos = AdjuntoProyecto.objects.filter(proyecto_id=pk).select_related('subido_por').order_by('-fecha')
+        timings['auxiliares_ms'] = round((time.perf_counter() - t2) * 1000, 2)
+
+        timings['total_ms'] = round((time.perf_counter() - t_inicio) * 1000, 2)
+        return Response({
+            'proyecto': ProyectoSerializer(proyecto).data,
+            'tareas': tareas_data,
+            'etapas': EtapaSerializer(etapas, many=True).data,
+            'indicadores': IndicadorSerializer(indicadores, many=True).data,
+            'adjuntos': AdjuntoProyectoSerializer(adjuntos, many=True).data,
+            'dependencias': self._dependencias_proyecto(proyecto),
+            '_rendimiento': timings,
+        })
 
 
 class ProyectoEquipoViewSet(viewsets.ModelViewSet):

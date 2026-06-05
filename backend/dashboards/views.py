@@ -9,30 +9,18 @@ from collections import defaultdict
 from hashlib import md5
 from urllib.parse import urlencode
 from tasks.models import Tarea, HistorialTarea
-from projects.models import Proyecto, ProyectoArea, ProyectoSecretaria, Eje, Plan, Programa, ObjetivoEstrategico, Indicador
+from projects.models import Proyecto, ProyectoArea, ProyectoSecretaria, ProyectoObjetivo, Eje, Plan, Programa, ObjetivoEstrategico, Indicador
+from projects.planificacion_import import LEGACY_ANIO
 from config.pagination import ProjectDashboardPagination
 
 
-def _bulk_avances_historiales(proyecto_ids):
-    """Precalcula avances y últimos historiales para muchos proyectos (evita N+1)."""
-    if not proyecto_ids:
-        return {}, {}
-    from tasks.models import Tarea, HistorialTarea
-    avances = dict(
-        Tarea.objects.filter(proyecto_id__in=proyecto_ids)
-        .values('proyecto_id')
-        .annotate(avg=Avg('porcentaje_avance'))
-        .values_list('proyecto_id', 'avg')
-    )
-    historiales = HistorialTarea.objects.filter(
-        tarea__proyecto_id__in=proyecto_ids
-    ).select_related('tarea__area', 'usuario').order_by('-fecha')
-    ultimos = {}
-    for h in historiales:
-        pid = h.tarea.proyecto_id
-        if pid not in ultimos:
-            ultimos[pid] = h
-    return avances, ultimos
+from projects.avances import (
+    bulk_avances_historiales as _bulk_avances_historiales,
+    ultimos_dos_historiales_por_tarea,
+    avance_objetivos_proyecto as _avance_objetivos_proyecto,
+    objetivos_por_proyecto_map as _objetivos_por_proyecto_map,
+    agregar_objetivos_grupo as _agregar_objetivos_grupo,
+)
 from users.access import (
     ROL_ADMIN,
     ROL_CARGA,
@@ -314,6 +302,40 @@ class EvolucionProyectoView(APIView):
         return Response(resultado)
 
 
+def _proyectos_vinculados_objetivo(objetivo):
+    """Proyectos asociados al objetivo (FK legacy + vínculos N:M)."""
+    vistos = {}
+    for proyecto in objetivo.proyectos.all():
+        vistos[proyecto.id] = proyecto
+    for vinculo in objetivo.vinculos_proyecto.all():
+        proyecto = vinculo.proyecto
+        if proyecto:
+            vistos[proyecto.id] = proyecto
+    return list(vistos.values())
+
+
+def _serializar_proyecto_planificacion(proyecto, avances_map):
+    avance_tareas = round(float(avances_map.get(proyecto.id) or 0), 2)
+    avance_objetivos = _avance_objetivos_proyecto(proyecto)
+    return {
+        'id': proyecto.id,
+        'nombre': proyecto.nombre,
+        'estado': proyecto.estado,
+        'avance_tareas': avance_tareas,
+        'avance_objetivos': avance_objetivos,
+        'porcentaje_avance': avance_tareas,
+        'indicadores': [
+            {
+                'id': i.id,
+                'descripcion': i.descripcion,
+                'unidad_medida': i.unidad_medida,
+                'frecuencia': i.frecuencia,
+            }
+            for i in proyecto.indicadores.all()
+        ],
+    }
+
+
 class PlanificacionArbolView(APIView):
     """Retorna la estructura jerárquica: Eje → Plan → Programa → Objetivo → Proyecto → Indicador."""
     def get(self, request):
@@ -323,13 +345,47 @@ class PlanificacionArbolView(APIView):
             ROL_VISUALIZACION,
             message='Solo Administrador o Visualización pueden consultar la planificación.'
         )
-        ejes = Eje.objects.prefetch_related(
-            'planes__programas__objetivos_estrategicos__proyectos__indicadores'
-        ).all()
+        anio_param = request.query_params.get('anio')
+        if anio_param:
+            try:
+                anio = int(anio_param)
+            except (TypeError, ValueError):
+                anio = LEGACY_ANIO
+        else:
+            anio = LEGACY_ANIO
+
+        ejes_qs = Eje.objects.prefetch_related(
+            Prefetch(
+                'planes__programas__objetivos_estrategicos__proyectos',
+                queryset=Proyecto.objects.prefetch_related('indicadores', 'objetivos_proyecto'),
+            ),
+            Prefetch(
+                'planes__programas__objetivos_estrategicos__vinculos_proyecto',
+                queryset=ProyectoObjetivo.objects.select_related('proyecto').prefetch_related(
+                    Prefetch('proyecto__indicadores', queryset=Indicador.objects.all()),
+                    'proyecto__objetivos_proyecto',
+                ),
+            ),
+        )
+        if anio is not None:
+            ejes_qs = ejes_qs.filter(anio=anio)
+        ejes = ejes_qs.all()
+
+        proyecto_ids = set()
+        for eje in ejes:
+            for plan in eje.planes.all():
+                for prog in plan.programas.all():
+                    for obj in prog.objetivos_estrategicos.all():
+                        for p in _proyectos_vinculados_objetivo(obj):
+                            proyecto_ids.add(p.id)
+
+        avances_map, _ = _bulk_avances_historiales(list(proyecto_ids))
+
         resultado = []
         for eje in ejes:
             eje_data = {
                 'id': eje.id_eje,
+                'anio': eje.anio,
                 'nombre': eje.nombre_eje,
                 'planes': []
             }
@@ -346,14 +402,11 @@ class PlanificacionArbolView(APIView):
                         'objetivos': []
                     }
                     for obj in prog.objetivos_estrategicos.all():
-                        proyectos_data = []
-                        for p in obj.proyectos.all():
-                            proy_dict = {'id': p.id, 'nombre': p.nombre, 'estado': p.estado, 'porcentaje_avance': p.porcentaje_avance}
-                            proy_dict['indicadores'] = [
-                                {'id': i.id, 'descripcion': i.descripcion, 'unidad_medida': i.unidad_medida, 'frecuencia': i.frecuencia}
-                                for i in p.indicadores.all()
-                            ]
-                            proyectos_data.append(proy_dict)
+                        proyectos_data = [
+                            _serializar_proyecto_planificacion(p, avances_map)
+                            for p in _proyectos_vinculados_objetivo(obj)
+                        ]
+                        proyectos_data.sort(key=lambda x: x['nombre'].lower())
                         obj_data = {'id': obj.id, 'descripcion': obj.descripcion, 'proyectos': proyectos_data}
                         prog_data['objetivos'].append(obj_data)
                     plan_data['programas'].append(prog_data)
@@ -373,28 +426,38 @@ class AvancesPorAreaView(APIView):
             message='Solo Administrador o Visualización pueden consultar avances por área.'
         )
         try:
-            tareas = Tarea.objects.select_related('area', 'secretaria', 'proyecto').prefetch_related(
-                Prefetch('historial', queryset=HistorialTarea.objects.order_by('-fecha'))
-            ).all()
+            tareas = filter_tasks_for_user(
+                Tarea.objects.select_related('area', 'secretaria', 'proyecto'),
+                request.user,
+            ).only(
+                'id', 'titulo', 'estado', 'porcentaje_avance', 'proyecto_id',
+                'area__nombre', 'secretaria__nombre', 'proyecto__nombre',
+            )
             area_filtro = request.query_params.get('area', '').strip()
             if area_filtro:
                 tareas = tareas.filter(area__nombre__iexact=area_filtro)
+            tareas = list(tareas)
+
+            historiales = ultimos_dos_historiales_por_tarea([t.id for t in tareas])
             resultado = defaultdict(lambda: {'area': '', 'tareas': []})
+            proyectos_por_grupo = defaultdict(set)
 
             for t in tareas:
-                hist = list(t.historial.all())[:2]
+                hist = historiales.get(t.id, [])
                 ultimo_incremento = None
                 fecha_ultima = None
                 if hist:
-                    fecha_ultima = hist[0].fecha
+                    fecha_ultima = hist[0][0]
                     if len(hist) >= 2:
-                        ultimo_incremento = hist[0].porcentaje_avance - hist[1].porcentaje_avance
+                        ultimo_incremento = hist[0][1] - hist[1][1]
                     else:
-                        ultimo_incremento = hist[0].porcentaje_avance
+                        ultimo_incremento = hist[0][1]
 
                 area_nombre = t.area.nombre if t.area else (t.secretaria.nombre if t.secretaria else 'Sin asignar')
                 proyecto_nombre = t.proyecto.nombre if t.proyecto else ''
                 resultado[area_nombre]['area'] = area_nombre
+                if t.proyecto_id:
+                    proyectos_por_grupo[area_nombre].add(t.proyecto_id)
                 resultado[area_nombre]['tareas'].append({
                     'id': t.id,
                     'titulo': t.titulo or '',
@@ -404,6 +467,12 @@ class AvancesPorAreaView(APIView):
                     'ultimo_incremento': ultimo_incremento,
                     'fecha_ultima_actualizacion': fecha_ultima.isoformat() if fecha_ultima else None,
                 })
+
+            objetivos_map = _objetivos_por_proyecto_map(proyectos_por_grupo)
+            for nombre, grupo in resultado.items():
+                grupo['objetivos'] = _agregar_objetivos_grupo(
+                    proyectos_por_grupo.get(nombre, set()), objetivos_map
+                )
 
             areas_ordenadas = sorted(resultado.values(), key=lambda x: x['area'])
             return Response({'areas': areas_ordenadas})
@@ -422,28 +491,38 @@ class AvancesPorSecretariaView(APIView):
             message='Solo Administrador o Visualización pueden consultar avances por secretaría.'
         )
         try:
-            tareas = Tarea.objects.select_related('secretaria', 'proyecto').prefetch_related(
-                Prefetch('historial', queryset=HistorialTarea.objects.order_by('-fecha'))
-            ).filter(secretaria__isnull=False)
+            tareas = filter_tasks_for_user(
+                Tarea.objects.select_related('secretaria', 'proyecto').filter(secretaria__isnull=False),
+                request.user,
+            ).only(
+                'id', 'titulo', 'estado', 'porcentaje_avance', 'proyecto_id',
+                'secretaria__nombre', 'proyecto__nombre',
+            )
             secretaria_filtro = request.query_params.get('secretaria', '').strip()
             if secretaria_filtro:
                 tareas = tareas.filter(secretaria_id=secretaria_filtro)
+            tareas = list(tareas)
+
+            historiales = ultimos_dos_historiales_por_tarea([t.id for t in tareas])
             resultado = defaultdict(lambda: {'secretaria': '', 'tareas': []})
+            proyectos_por_grupo = defaultdict(set)
 
             for t in tareas:
-                hist = list(t.historial.all())[:2]
+                hist = historiales.get(t.id, [])
                 ultimo_incremento = None
                 fecha_ultima = None
                 if hist:
-                    fecha_ultima = hist[0].fecha
+                    fecha_ultima = hist[0][0]
                     if len(hist) >= 2:
-                        ultimo_incremento = hist[0].porcentaje_avance - hist[1].porcentaje_avance
+                        ultimo_incremento = hist[0][1] - hist[1][1]
                     else:
-                        ultimo_incremento = hist[0].porcentaje_avance
+                        ultimo_incremento = hist[0][1]
 
                 secretaria_nombre = t.secretaria.nombre if t.secretaria else 'Sin asignar'
                 proyecto_nombre = t.proyecto.nombre if t.proyecto else ''
                 resultado[secretaria_nombre]['secretaria'] = secretaria_nombre
+                if t.proyecto_id:
+                    proyectos_por_grupo[secretaria_nombre].add(t.proyecto_id)
                 resultado[secretaria_nombre]['tareas'].append({
                     'id': t.id,
                     'titulo': t.titulo or '',
@@ -453,6 +532,12 @@ class AvancesPorSecretariaView(APIView):
                     'ultimo_incremento': ultimo_incremento,
                     'fecha_ultima_actualizacion': fecha_ultima.isoformat() if fecha_ultima else None,
                 })
+
+            objetivos_map = _objetivos_por_proyecto_map(proyectos_por_grupo)
+            for nombre, grupo in resultado.items():
+                grupo['objetivos'] = _agregar_objetivos_grupo(
+                    proyectos_por_grupo.get(nombre, set()), objetivos_map
+                )
 
             secretarias_ordenadas = sorted(resultado.values(), key=lambda x: x['secretaria'])
             return Response({'secretarias': secretarias_ordenadas})
@@ -596,6 +681,68 @@ class DashboardAnaliticoView(APIView):
         avance_promedio = round(float(tareas_qs.aggregate(avg=Avg('porcentaje_avance')).get('avg') or 0), 2)
         tareas_bloqueadas = sum(1 for t in tareas if t['estado'] == 'Bloqueada')
         tareas_activas = sum(1 for t in tareas if t['estado'] != 'Finalizada')
+
+        objetivos_por_estado = {
+            ProyectoObjetivo.ESTADO_NO_INICIADO: 0,
+            ProyectoObjetivo.ESTADO_EN_PROGRESO: 0,
+            ProyectoObjetivo.ESTADO_FINALIZADO: 0,
+        }
+        objetivos_total = 0
+        objetivos_por_proyecto_map = {}
+        nombres_proyecto = {p['id']: p['nombre'] for p in proyectos}
+        if proyecto_ids:
+            objetivos_rows = (
+                ProyectoObjetivo.objects.filter(proyecto_id__in=proyecto_ids)
+                .values('proyecto_id', 'estado_avance')
+                .annotate(cantidad=Count('id'))
+            )
+            for row in objetivos_rows:
+                estado_obj = row['estado_avance']
+                cantidad = row['cantidad']
+                proyecto_id = row['proyecto_id']
+                objetivos_total += cantidad
+                if estado_obj in objetivos_por_estado:
+                    objetivos_por_estado[estado_obj] += cantidad
+                detalle = objetivos_por_proyecto_map.setdefault(
+                    proyecto_id,
+                    {
+                        'id': proyecto_id,
+                        'nombre': nombres_proyecto.get(proyecto_id, 'Sin nombre'),
+                        'total': 0,
+                        'no_iniciado': 0,
+                        'en_progreso': 0,
+                        'finalizado': 0,
+                    },
+                )
+                detalle['total'] += cantidad
+                if estado_obj == ProyectoObjetivo.ESTADO_NO_INICIADO:
+                    detalle['no_iniciado'] += cantidad
+                elif estado_obj == ProyectoObjetivo.ESTADO_EN_PROGRESO:
+                    detalle['en_progreso'] += cantidad
+                elif estado_obj == ProyectoObjetivo.ESTADO_FINALIZADO:
+                    detalle['finalizado'] += cantidad
+        avance_objetivos_global = round(
+            sum(
+                ProyectoObjetivo.AVANCE_POR_ESTADO.get(estado_obj, 0) * cantidad
+                for estado_obj, cantidad in objetivos_por_estado.items()
+            ) / objetivos_total,
+            2,
+        ) if objetivos_total else 0
+
+        objetivos_por_proyecto = []
+        for detalle in objetivos_por_proyecto_map.values():
+            total_proy = detalle['total']
+            avance_proy = round(
+                (detalle['en_progreso'] * ProyectoObjetivo.AVANCE_POR_ESTADO[ProyectoObjetivo.ESTADO_EN_PROGRESO]
+                 + detalle['finalizado'] * ProyectoObjetivo.AVANCE_POR_ESTADO[ProyectoObjetivo.ESTADO_FINALIZADO])
+                / total_proy,
+                2,
+            ) if total_proy else 0
+            objetivos_por_proyecto.append({**detalle, 'avance': avance_proy})
+        objetivos_por_proyecto = sorted(
+            objetivos_por_proyecto,
+            key=lambda item: (-item['avance'], -item['total'], item['nombre']),
+        )
 
         def _nombre_persona(nombre, apellido):
             base = f"{nombre or ''} {apellido or ''}".strip()
@@ -824,9 +971,20 @@ class DashboardAnaliticoView(APIView):
                 'proyectos_en_riesgo': len(proyectos_riesgo),
                 'tareas_bloqueadas': tareas_bloqueadas,
                 'tareas_activas': tareas_activas,
+                'objetivos_total': objetivos_total,
+                'objetivos_no_iniciados': objetivos_por_estado[ProyectoObjetivo.ESTADO_NO_INICIADO],
+                'objetivos_en_progreso': objetivos_por_estado[ProyectoObjetivo.ESTADO_EN_PROGRESO],
+                'objetivos_finalizados': objetivos_por_estado[ProyectoObjetivo.ESTADO_FINALIZADO],
+                'avance_objetivos': avance_objetivos_global,
             },
             'charts': {
                 'proyectos_por_estado': proyectos_por_estado,
+                'objetivos_por_estado': [
+                    {'name': 'No iniciados', 'value': objetivos_por_estado[ProyectoObjetivo.ESTADO_NO_INICIADO], 'estado': ProyectoObjetivo.ESTADO_NO_INICIADO},
+                    {'name': 'En proceso', 'value': objetivos_por_estado[ProyectoObjetivo.ESTADO_EN_PROGRESO], 'estado': ProyectoObjetivo.ESTADO_EN_PROGRESO},
+                    {'name': 'Finalizados', 'value': objetivos_por_estado[ProyectoObjetivo.ESTADO_FINALIZADO], 'estado': ProyectoObjetivo.ESTADO_FINALIZADO},
+                ],
+                'objetivos_por_proyecto': objetivos_por_proyecto,
                 'proyectos_por_dependencia': proyectos_por_dependencia,
                 'tendencia_avance': tendencia,
                 'vencimientos': [

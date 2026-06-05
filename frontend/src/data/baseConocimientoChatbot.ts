@@ -623,13 +623,13 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['tecnología', 'stack', 'arquitectura', 'cómo está hecho', 'backend', 'frontend', 'django', 'vue'],
     respuesta: r(
       'Arquitectura del sistema SIP-AIF',
-      'SIP-AIF es un sistema full-stack: Backend en Django REST Framework (Python) con Microsoft SQL Server. Frontend en Vue 3 + Vite + TypeScript. Autenticación JWT. API REST en /api/. El frontend usa proxy hacia el backend en desarrollo. Puerto backend: 8001, frontend: 5173.',
+      'SIP-AIF es un sistema full-stack: Backend en Django REST Framework (Python) con Microsoft SQL Server. Frontend en Vue 3 + Vite + TypeScript. Autenticación JWT. API REST en /api/. El frontend usa proxy hacia el backend en desarrollo. Puerto backend: 8000, frontend: 5173.',
       [
         'Backend: Django 4.x, DRF, Microsoft SQL Server, JWT.',
         'Frontend: Vue 3, Vue Router, Axios, Vite.',
         'Base de datos: Microsoft SQL Server (obligatoria).',
       ],
-      'URLs: Backend http://127.0.0.1:8001, Frontend http://localhost:5173',
+      'URLs: Backend http://127.0.0.1:8000, Frontend http://localhost:5173',
       undefined
     ),
   },
@@ -637,10 +637,10 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['ejecutar sistema', 'iniciar', 'levantar', 'arrancar', 'ejecutar-sistema-completo', 'bat'],
     respuesta: r(
       'Cómo ejecutar el sistema',
-      'Use el archivo ejecutar-sistema-completo.bat en la raíz del proyecto. Este script: 1) Verifica conexión a Microsoft SQL Server y ejecuta migraciones. 2) Carga datos iniciales (roles, usuarios, áreas). 3) Inicia el backend en puerto 8001. 4) Inicia el frontend en puerto 5173. Requiere Microsoft SQL Server accesible (base en .env, ej. Sipra-Test o Sipra).',
+      'Use el archivo ejecutar-sistema-completo.bat en la raíz del proyecto. Este script: 1) Verifica conexión a Microsoft SQL Server y ejecuta migraciones. 2) Carga datos iniciales (roles, usuarios, áreas). 3) Inicia el backend en puerto 8000. 4) Inicia el frontend en puerto 5173. Requiere Microsoft SQL Server accesible (base en .env, ej. Sipra-Test o Sipra).',
       [
-        'Microsoft SQL Server debe estar activo en localhost:5432.',
-        'Base de datos: sipra. Usuario: SQL Server.',
+        'Microsoft SQL Server debe estar activo (por defecto en el puerto 1433).',
+        'Base de datos: Sipra (configurable en el archivo .env del backend).',
         'No cierre las ventanas de backend y frontend.',
       ],
       'Alternativa: diagnostico-db.bat para verificar la conexión a la BD.',
@@ -650,9 +650,10 @@ export const entradasConocimiento: EntradaConocimiento[] = [
   {
     keywords: ['credenciales', 'contraseña', 'usuario admin', 'login', 'iniciar sesión', 'acceso'],
     respuesta: r(
-      'Credenciales de acceso',
-      'Usuarios por defecto: admin@admin.com / admin123, admin@sipra.local / AdminSipra2026!, bogarin1983@gmail.com / Sipra2026. Si no puede ingresar: verifique que el backend esté corriendo (puerto 8001), que Microsoft SQL Server esté activo, y que use la URL correcta del frontend (localhost:5173).',
+      'Acceso al sistema',
+      'Por seguridad, las credenciales no se muestran aquí. Solicítelas al Administrador del sistema o a su responsable de área. Si no puede ingresar: verifique que el backend esté corriendo (puerto 8000), que la base de datos SQL Server esté activa y que use la URL correcta del frontend (http://localhost:5173).',
       [
+        'Credenciales: pídalas al Administrador; no se publican en el asistente.',
         'Token inválido o expirado: cierre sesión, borre localStorage o use ventana de incógnito.',
         'Error de conexión: el backend no está corriendo o hay problema de red.',
         'Credenciales incorrectas: verifique email y contraseña (mayúsculas/minúsculas).',
@@ -677,7 +678,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['backup', 'respaldo', 'guardar copia', 'exportar datos'],
     respuesta: r(
       'Backup del sistema',
-      'En el módulo Backup y Restore (solo Administrador) puede crear backups de la base de datos Microsoft SQL Server y del código. Hay dos tipos: backup de datos (pg_dump, archivo .sql) y backup de código (copia de archivos del proyecto). Los backups se listan con fecha y puede filtrar por rango de fechas o texto. Use "Crear backup" para generar una copia. Los backups permiten restaurar en caso de fallo.',
+      'En el módulo Backup y Restore (solo Administrador) puede crear backups de la base de datos Microsoft SQL Server y del código. Hay dos tipos: backup de datos (copia de la base SQL Server, archivo .bak) y backup de código (copia de archivos del proyecto). Los backups se listan con fecha y puede filtrar por rango de fechas o texto. Use "Crear backup" para generar una copia. Los backups permiten restaurar en caso de fallo.',
       [
         'Backup de datos: exporta la base Microsoft SQL Server completa.',
         'Backup de código: copia los archivos del proyecto.',
@@ -945,7 +946,7 @@ export const entradasConocimiento: EntradaConocimiento[] = [
     keywords: ['error', 'no funciona', 'falla', 'problema', 'no puedo'],
     respuesta: r(
       'Solución de problemas',
-      'Errores comunes: 1) No puedo ingresar: verifique backend en 8001, Microsoft SQL Server activo, credenciales correctas. 2) Token expirado: cierre sesión, borre localStorage. 3) Error de conexión: backend no está corriendo. 4) Error de BD: ejecute diagnostico-db.bat. 5) Credenciales en .bat: use .env para no exponer contraseñas.',
+      'Errores comunes: 1) No puedo ingresar: verifique backend en 8000, Microsoft SQL Server activo, credenciales correctas. 2) Token expirado: cierre sesión, borre localStorage. 3) Error de conexión: backend no está corriendo. 4) Error de BD: ejecute diagnostico-db.bat. 5) Credenciales en .bat: use .env para no exponer contraseñas.',
       [
         'diagnostico-db.bat: verifica conexión a Microsoft SQL Server.',
         'restaurar-datos.bat: restaura datos iniciales.',
@@ -962,6 +963,190 @@ export const entradasConocimiento: EntradaConocimiento[] = [
       'SIP-AIF es el Sistema Integral de Proyectos. Permite gestionar proyectos, tareas, avances, áreas, secretarías, usuarios y roles. Incluye planificación estratégica (ejes, planes, programas, objetivos), dashboards, alertas de vencimiento, backup/restore y auditoría. Desarrollado para la Agencia de Innovación.',
       undefined,
       undefined,
+      undefined
+    ),
+  },
+
+  // ========== OBJETIVOS: ESTADOS Y AVANCE ==========
+  {
+    keywords: ['estado objetivos', 'objetivos no iniciados', 'objetivos en progreso', 'objetivos finalizados', 'avance objetivos', 'cuántos objetivos'],
+    respuesta: r(
+      'Estado y avance de objetivos',
+      'Cada objetivo vinculado a un proyecto tiene un estado: No iniciado (0%), En progreso (50%) o Finalizado (100%). El sistema calcula el avance de objetivos como el promedio ponderado de esos estados. Lo verá en: el detalle del proyecto, el listado de Proyectos (chips por estado y barra), el panel de Planificación (badge "Obj. X%") y el Dashboard (panel "Estado de los objetivos").',
+      [
+        'No iniciado = 0%, En progreso = 50%, Finalizado = 100%.',
+        'El avance de objetivos es independiente del avance por tareas.',
+        'En Proyectos verá un desglose: no iniciados, en progreso, finalizados y total.',
+        'Cambie el estado de un objetivo desde el detalle o edición del proyecto.',
+      ],
+      'Si un proyecto tiene 4 objetivos (2 en progreso, 2 finalizados): avance = (2×50 + 2×100) / 4 = 75%.',
+      'Proyectos'
+    ),
+  },
+  {
+    keywords: ['objetivos dashboard', 'panel objetivos', 'gráfico objetivos', 'estadísticas objetivos', 'objetivos por proyecto'],
+    respuesta: r(
+      'Objetivos en el Dashboard',
+      'El Dashboard incluye el panel "Estado de los objetivos" con: tarjetas de objetivos totales, no iniciados, en progreso y finalizados; un gráfico de dona con el avance global; y una lista de avance de objetivos por proyecto con barras de progreso. Cada proyecto de la lista es clicable y lleva a su detalle.',
+      [
+        'Tarjetas: contador y porcentaje de cada estado.',
+        'Dona: avance global de objetivos en el centro.',
+        'Barras por proyecto: avance individual de objetivos.',
+      ],
+      undefined,
+      'Dashboard'
+    ),
+  },
+  {
+    keywords: ['objetivos por área', 'objetivos por secretaría', 'objetivos área secretaría'],
+    respuesta: r(
+      'Objetivos por Área y Secretaría',
+      'Los paneles "Avances por Área" y "Avances por Secretaría" muestran, además de las tareas, un resumen de los objetivos de los proyectos de cada grupo: total, no iniciados, en progreso, finalizados, porcentaje de avance y una barra de proporción por estado. También hay un consolidado general y se incluye en la exportación a Excel.',
+      undefined,
+      undefined,
+      'Avances por Área'
+    ),
+  },
+
+  // ========== PRESUPUESTO ==========
+  {
+    keywords: ['presupuesto', 'detalle presupuestario', 'presupuesto proyecto', 'monto', 'gasto', 'ejecución presupuestaria', 'fuente financiamiento'],
+    respuesta: r(
+      'Presupuesto del proyecto',
+      'Cada proyecto tiene un presupuesto total, una fuente de financiamiento (Provincial, Nacional, CFI, Otros, Sin Erogación) y un detalle presupuestario por ítems (categoría, monto y observación). En el detalle del proyecto verá: presupuesto total, total cargado, disponible y el porcentaje ejecutado. La exportación a Excel incluye el detalle presupuestario completo.',
+      [
+        'Defina el presupuesto total y la fuente al crear/editar el proyecto.',
+        'Agregue ítems de gasto con categoría, monto y detalle.',
+        'El "disponible" es el total menos lo cargado en ítems.',
+        'El porcentaje ejecutado compara lo cargado contra el total.',
+      ],
+      'Categorías: Equipamiento, Gastos operativos y logísticos, Dotación.',
+      'Proyectos'
+    ),
+  },
+
+  // ========== REPORTES Y EXPORTACIÓN CON GRÁFICOS ==========
+  {
+    keywords: ['exportar proyecto', 'exportar detalle proyecto', 'reporte proyecto', 'excel proyecto con gráficos', 'exportar con gráficos'],
+    respuesta: r(
+      'Exportar un proyecto a Excel',
+      'Desde el detalle del proyecto, el botón "Exportar a Excel" genera un archivo con: datos generales, detalle presupuestario, objetivos y sus estados, resumen visual, indicadores, etapas y tareas. Incluye además una hoja "Gráficos" con imágenes: dona de avance general, dona de avance de objetivos, barras de objetivos por estado, semáforo de vencimientos y avance por tarea.',
+      [
+        'Abra el proyecto y use "Exportar a Excel".',
+        'El archivo incluye datos y una hoja de gráficos.',
+        'Si una imagen no se genera, los datos se exportan igual.',
+      ],
+      undefined,
+      'Proyectos'
+    ),
+  },
+  {
+    keywords: ['exportar dashboard', 'exportar resumen', 'reporte dashboard', 'resumen ejecutivo excel'],
+    respuesta: r(
+      'Exportar el resumen del Dashboard',
+      'Con rol Administrador o Visualización, el botón "Exportar resumen" del Dashboard genera un Excel con: indicadores (incluye objetivos), hoja "Graficos" con todas las visualizaciones (estado, dependencia, tendencia, vencimientos, atrasados, carga, objetivos por estado y avance de objetivos por proyecto), hoja de proyectos en riesgo, tareas críticas y una hoja "Objetivos".',
+      [
+        'Aplique filtros (dependencia/estado) antes de exportar.',
+        'La hoja "Graficos" incluye los gráficos de objetivos.',
+        'La hoja "Objetivos" detalla el avance por proyecto.',
+      ],
+      undefined,
+      'Dashboard'
+    ),
+  },
+
+  // ========== IMPORTACIÓN MASIVA ==========
+  {
+    keywords: ['importar', 'importación masiva', 'carga masiva', 'importar planificación', 'importar excel', 'plantilla importación', 'subir planificación'],
+    respuesta: r(
+      'Importación masiva de planificación',
+      'En Planificación puede importar la estructura desde un archivo Excel/CSV con la jerarquía Eje → Plan → Programa → Objetivo → Proyecto → Indicador. Seleccione el año, descargue la plantilla, complete los datos y súbala desde el panel de importación. La planificación 2026 está protegida: la importación masiva queda bloqueada para ese año para no alterar los datos existentes.',
+      [
+        'Elija el año en el selector de Planificación.',
+        'Descargue la plantilla de importación.',
+        'Complete las columnas según la jerarquía.',
+        'Suba el archivo; el sistema valida y crea los registros.',
+      ],
+      'El año 2026 es de solo lectura para importación (datos cargados).',
+      'Planificación'
+    ),
+  },
+  {
+    keywords: ['año planificación', 'periodo planificación', 'seleccionar año', 'cambiar año'],
+    respuesta: r(
+      'Año / período de planificación',
+      'La planificación admite varios años. Use el selector de año en el panel de Planificación para ver la estructura de cada período. El árbol (Ejes, Planes, Programas, Objetivos, Proyectos) se filtra por el año seleccionado. El año por defecto es 2026.',
+      undefined,
+      undefined,
+      'Planificación'
+    ),
+  },
+
+  // ========== GRÁFICOS Y MÉTRICAS ==========
+  {
+    keywords: ['gráficos dashboard', 'qué gráficos', 'tipos de gráfico', 'interpretar gráficos', 'visualizaciones'],
+    respuesta: r(
+      'Gráficos y visualizaciones',
+      'El Dashboard incluye: proyectos por estado (dona), proyectos por dependencia (barras), tendencia de avance (línea temporal), tareas y proyectos por vencer (barras/semáforo), top proyectos atrasados (barras), carga por responsable (barras apiladas) y el panel de objetivos (dona + barras por proyecto). Muchos gráficos son clicables y llevan al listado filtrado correspondiente.',
+      [
+        'Dona de estado: distribución de proyectos por estado.',
+        'Tendencia: evolución mensual del avance promedio.',
+        'Vencimientos: semáforo de tareas/proyectos por vencer.',
+        'Clic en un gráfico: navega al listado filtrado.',
+      ],
+      undefined,
+      'Dashboard'
+    ),
+  },
+  {
+    keywords: ['métricas', 'kpi', 'indicadores clave', 'avance promedio', 'qué significan los números'],
+    respuesta: r(
+      'Métricas e indicadores clave',
+      'Principales métricas: Total de proyectos, Activos, Finalizados, Avance promedio (promedio del avance de tareas), Proyectos en riesgo (atrasados o con tareas bloqueadas), Tareas bloqueadas/activas, y los indicadores de objetivos (total y por estado). El avance de un proyecto se calcula desde el promedio de avance de sus tareas; el avance de objetivos, desde el estado de los objetivos vinculados.',
+      undefined,
+      'Avance de tareas y avance de objetivos son métricas distintas y complementarias.',
+      'Dashboard'
+    ),
+  },
+
+  // ========== FAQ / PREGUNTAS FRECUENTES ==========
+  {
+    keywords: ['preguntas frecuentes', 'faq', 'dudas comunes', 'preguntas comunes'],
+    respuesta: r(
+      'Preguntas frecuentes (FAQ)',
+      'Algunas consultas habituales: ¿Cómo creo un proyecto? ¿Cómo cargo avances? ¿Cómo reasigno un proyecto? ¿Cómo exporto a Excel con gráficos? ¿Qué significan los estados de objetivos? ¿Cómo importo la planificación? ¿Cuál es la diferencia entre Área y Secretaría? ¿Qué ve cada rol? Escriba cualquiera de estas preguntas o el tema que le interese y le doy el paso a paso.',
+      [
+        'Proyectos: crear, editar, reasignar, exportar.',
+        'Tareas: crear, asignar, cargar avances, prioridad.',
+        'Objetivos: estados, avance, dónde se ven.',
+        'Reportes: exportación a Excel con gráficos.',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['paso a paso', 'guía de uso', 'cómo empiezo', 'primeros pasos', 'tutorial', 'cómo usar el sistema'],
+    respuesta: r(
+      'Guía de uso paso a paso',
+      'Flujo recomendado para empezar: 1) Revise la Planificación (Ejes → Planes → Programas → Objetivos). 2) Cree o revise sus Proyectos y vincúlelos a objetivos. 3) Cargue las Tareas de cada proyecto con responsable y fechas. 4) Los usuarios Carga actualizan avances. 5) Siga el progreso en el Dashboard y en Avances por Área/Secretaría. 6) Exporte reportes a Excel cuando lo necesite.',
+      [
+        'Planificación: define la estructura estratégica.',
+        'Proyectos y tareas: el trabajo concreto.',
+        'Cargar avances: actualización del progreso.',
+        'Dashboard y avances: seguimiento y reportes.',
+      ],
+      undefined,
+      undefined
+    ),
+  },
+  {
+    keywords: ['hola', 'buenas', 'buenos días', 'buenas tardes', 'saludos', 'gracias', 'muchas gracias'],
+    respuesta: r(
+      '¡Hola! Soy el asistente de SIP-AIF',
+      'Puedo ayudarle a entender y usar el sistema: módulos, proyectos, objetivos, presupuestos, tareas, reportes, exportaciones, importaciones, gráficos, métricas y permisos. Escriba su consulta en lenguaje natural o elija una de las sugerencias del módulo donde está. ¿Sobre qué necesita ayuda?',
+      undefined,
+      'Pruebe: "¿Cómo exporto un proyecto con gráficos?" o "¿Qué significan los estados de objetivos?"',
       undefined
     ),
   },
@@ -1054,27 +1239,111 @@ export function obtenerSugerenciasPorRuta(ruta: string): string[] {
   ]
 }
 
-/** Buscar respuesta según la pregunta del usuario */
-export function buscarRespuesta(pregunta: string): RespuestaChatbot | null {
-  const texto = normalizar(pregunta)
-  if (!texto || texto.length < 2) return null
+/**
+ * Diccionario de sinónimos: mapea términos equivalentes a una forma canónica.
+ * Permite interpretar consultas escritas de distintas maneras sin duplicar keywords.
+ */
+const SINONIMOS: Record<string, string> = {
+  // acciones
+  agregar: 'crear', añadir: 'crear', anadir: 'crear', nuevo: 'crear', nueva: 'crear', alta: 'crear', registrar: 'crear',
+  modificar: 'editar', cambiar: 'editar', actualizar: 'editar', ajustar: 'editar',
+  borrar: 'eliminar', quitar: 'eliminar', remover: 'eliminar', desactivar: 'eliminar',
+  descargar: 'exportar', bajar: 'exportar', generar: 'exportar', reporte: 'exportar', informe: 'exportar',
+  subir: 'importar', cargar: 'importar', adjuntar: 'importar',
+  mostrar: 'ver', visualizar: 'ver', consultar: 'ver',
+  // entidades
+  meta: 'objetivo', metas: 'objetivo', objetivos: 'objetivo',
+  proyectos: 'proyecto', tareas: 'tarea', usuarios: 'usuario', areas: 'area',
+  secretarias: 'secretaria', secretaría: 'secretaria', secretarías: 'secretaria',
+  presupuestario: 'presupuesto', presupuestaria: 'presupuesto', dinero: 'presupuesto', costo: 'presupuesto', costos: 'presupuesto',
+  grafica: 'grafico', graficas: 'grafico', graficos: 'grafico', graficar: 'grafico', chart: 'grafico',
+  metrica: 'metrica', metricas: 'metrica', indicadores: 'indicador', kpis: 'kpi',
+  porcentaje: 'avance', progreso: 'avance', porcentajes: 'avance',
+  panel: 'dashboard', tablero: 'dashboard', inicio: 'dashboard',
+  excel: 'exportar', planilla: 'exportar',
+  // ayuda
+  ayudame: 'ayuda', ayuda: 'ayuda', asistencia: 'ayuda', explicame: 'ayuda', explicar: 'ayuda',
+}
 
-  const palabras = texto.split(/\s+/).filter((p) => p.length > 1)
-  let mejorMatch: { entrada: EntradaConocimiento; score: number } | null = null
+/** Aplica sinónimos a una lista de palabras (agrega la forma canónica si existe) */
+function expandirSinonimos(palabras: string[]): string[] {
+  const out = new Set<string>(palabras)
+  for (const p of palabras) {
+    const canon = SINONIMOS[p]
+    if (canon) out.add(canon)
+  }
+  return Array.from(out)
+}
 
-  for (const entrada of entradasConocimiento) {
-    let score = 0
-    for (const kw of entrada.keywords) {
-      const kwNorm = normalizar(kw)
-      if (texto.includes(kwNorm)) score += 2
-      for (const p of palabras) {
-        if (kwNorm.includes(p) || p.includes(kwNorm)) score += 1
-      }
-    }
-    if (score > 0 && (!mejorMatch || score > mejorMatch.score)) {
-      mejorMatch = { entrada, score }
+/** Calcula el score de coincidencia entre el texto del usuario y una entrada */
+function scoreEntrada(texto: string, palabras: string[], entrada: EntradaConocimiento): number {
+  let score = 0
+  for (const kw of entrada.keywords) {
+    const kwNorm = normalizar(kw)
+    if (texto.includes(kwNorm)) score += 3
+    const kwPalabras = kwNorm.split(/\s+/)
+    for (const p of palabras) {
+      if (p.length < 2) continue
+      if (kwNorm === p) score += 2
+      else if (kwPalabras.includes(p)) score += 1.5
+      else if (kwNorm.includes(p) || p.includes(kwNorm)) score += 1
     }
   }
+  // bonus si el título de la respuesta contiene alguna palabra del usuario
+  const tituloNorm = normalizar(entrada.respuesta.titulo || '')
+  for (const p of palabras) {
+    if (p.length > 3 && tituloNorm.includes(p)) score += 1
+  }
+  return score
+}
 
-  return mejorMatch && mejorMatch.score >= 2 ? mejorMatch.entrada.respuesta : null
+/** Devuelve las mejores N coincidencias ordenadas por score */
+function rankearEntradas(pregunta: string): { entrada: EntradaConocimiento; score: number }[] {
+  const texto = normalizar(pregunta)
+  if (!texto || texto.length < 2) return []
+  const palabrasBase = texto.split(/\s+/).filter((p) => p.length > 1)
+  const palabras = expandirSinonimos(palabrasBase)
+
+  const matches: { entrada: EntradaConocimiento; score: number }[] = []
+  for (const entrada of entradasConocimiento) {
+    const score = scoreEntrada(texto, palabras, entrada)
+    if (score > 0) matches.push({ entrada, score })
+  }
+  matches.sort((a, b) => b.score - a.score)
+  return matches
+}
+
+/** Buscar respuesta según la pregunta del usuario */
+export function buscarRespuesta(pregunta: string): RespuestaChatbot | null {
+  const ranking = rankearEntradas(pregunta)
+  const mejor = ranking[0]
+  return mejor && mejor.score >= 2 ? mejor.entrada.respuesta : null
+}
+
+/**
+ * Devuelve los títulos de las preguntas relacionadas (excluyendo la principal),
+ * útil para mostrar "preguntas relacionadas" tras una respuesta.
+ */
+export function obtenerRelacionadas(pregunta: string, limite = 3): string[] {
+  const ranking = rankearEntradas(pregunta)
+  if (ranking.length <= 1) return []
+  return ranking
+    .slice(1, limite + 1)
+    .map((m) => m.entrada.respuesta.titulo)
+    .filter((t): t is string => Boolean(t))
+}
+
+/**
+ * Sugerencias inteligentes mientras el usuario escribe (autocompletado simple).
+ * Devuelve títulos de entradas que coinciden parcialmente con el texto parcial.
+ */
+export function sugerenciasInteligentes(textoParcial: string, limite = 4): string[] {
+  const texto = normalizar(textoParcial)
+  if (texto.length < 2) return []
+  const ranking = rankearEntradas(textoParcial)
+  const titulos = ranking
+    .filter((m) => m.score >= 1.5)
+    .map((m) => m.entrada.respuesta.titulo)
+    .filter((t): t is string => Boolean(t))
+  return Array.from(new Set(titulos)).slice(0, limite)
 }

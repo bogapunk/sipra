@@ -1,7 +1,7 @@
 """Utilidades de queryset para listados de proyectos (evita filas duplicadas por JOINs M2M)."""
 from django.db.models import Prefetch, Subquery
 
-from .models import Proyecto, ProyectoArea, ProyectoEquipo, ProyectoPresupuestoItem, ProyectoSecretaria
+from .models import Proyecto, ProyectoArea, ProyectoEquipo, ProyectoObjetivo, ProyectoPresupuestoItem, ProyectoSecretaria
 
 
 def _ids_subquery(qs):
@@ -21,6 +21,10 @@ def proyecto_dashboard_list_qs(qs_filtrado):
             Prefetch('proyectoarea_set', queryset=ProyectoArea.objects.select_related('area')),
             Prefetch('proyectosecretaria_set', queryset=ProyectoSecretaria.objects.select_related('secretaria')),
             Prefetch('equipo', queryset=ProyectoEquipo.objects.select_related('usuario')),
+            Prefetch(
+                'objetivos_proyecto',
+                queryset=ProyectoObjetivo.objects.select_related('objetivo__programa').order_by('id'),
+            ),
         )
         .order_by('id')
     )
@@ -36,6 +40,10 @@ def proyecto_viewset_list_qs(qs_filtrado):
             Prefetch('presupuesto_items', queryset=ProyectoPresupuestoItem.objects.order_by('orden', 'id')),
             'proyectoarea_set__area',
             'proyectosecretaria_set__secretaria',
+            Prefetch(
+                'objetivos_proyecto',
+                queryset=ProyectoObjetivo.objects.select_related('objetivo__programa').order_by('id'),
+            ),
         )
         .order_by('id')
     )

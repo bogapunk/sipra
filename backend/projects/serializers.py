@@ -5,8 +5,9 @@ from django.db.models import Avg
 from areas.models import Area
 from secretarias.models import Secretaria
 from .upload_validators import validate_uploaded_file, validate_original_filename
+from .avances import conteo_objetivos_por_estado
 from .models import (
-    Eje, Plan, Programa, ObjetivoEstrategico,
+    Eje, Plan, Programa, ObjetivoEstrategico, ProyectoObjetivo,
     Proyecto, ProyectoArea, ProyectoSecretaria, ProyectoEquipo, ProyectoPresupuestoItem, Etapa, ComentarioProyecto, AdjuntoProyecto, Indicador,
     ComentarioAuditLog, AdjuntoAuditLog,
 )
@@ -48,6 +49,29 @@ class IndicadorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Indicador
         fields = '__all__'
+
+
+class ProyectoObjetivoSerializer(serializers.ModelSerializer):
+    objetivo_id = serializers.IntegerField(source='objetivo.id', read_only=True)
+    descripcion = serializers.CharField(source='objetivo.descripcion', read_only=True)
+    programa_nombre = serializers.CharField(source='objetivo.programa.nombre_programa', read_only=True)
+    avance_porcentaje = serializers.SerializerMethodField()
+
+    def get_avance_porcentaje(self, obj):
+        return ProyectoObjetivo.AVANCE_POR_ESTADO.get(obj.estado_avance, 0)
+
+    class Meta:
+        model = ProyectoObjetivo
+        fields = ['id', 'objetivo_id', 'descripcion', 'programa_nombre', 'estado_avance', 'avance_porcentaje']
+
+
+class ProyectoObjetivoInputSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    estado_avance = serializers.ChoiceField(
+        choices=ProyectoObjetivo.ESTADOS_AVANCE,
+        required=False,
+        default=ProyectoObjetivo.ESTADO_NO_INICIADO,
+    )
 
 
 class ProyectoEquipoSerializer(serializers.ModelSerializer):
@@ -93,6 +117,9 @@ class ProyectoSerializer(serializers.ModelSerializer):
     equipo = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
     presupuesto_items = ProyectoPresupuestoItemSerializer(many=True, required=False)
     presupuesto_cargado = serializers.SerializerMethodField()
+    objetivos = ProyectoObjetivoInputSerializer(many=True, write_only=True, required=False)
+    objetivos_asignados = serializers.SerializerMethodField()
+    avance_objetivos = serializers.SerializerMethodField()
     areas_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
     secretarias_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
     areas_asignadas_ids = serializers.SerializerMethodField(read_only=True)
@@ -129,6 +156,58 @@ class ProyectoSerializer(serializers.ModelSerializer):
         for ps in obj.proyectosecretaria_set.all():
             ids.add(ps.secretaria_id)
         return sorted(ids)
+
+    def get_objetivos_asignados(self, obj):
+        rel = getattr(obj, 'objetivos_proyecto', None)
+        if rel is not None:
+            items = rel.all()
+        else:
+            items = ProyectoObjetivo.objects.filter(proyecto=obj).select_related('objetivo__programa')
+        return ProyectoObjetivoSerializer(items, many=True).data
+
+    def get_avance_objetivos(self, obj):
+        rel = getattr(obj, 'objetivos_proyecto', None)
+        if rel is not None:
+            return ProyectoObjetivo.calcular_avance_promedio(rel.all())
+        return ProyectoObjetivo.calcular_avance_promedio(
+            ProyectoObjetivo.objects.filter(proyecto=obj)
+        )
+
+    def _sync_objetivos(self, proyecto, objetivos_data):
+        if objetivos_data is None:
+            return
+
+        ids_conservados = set()
+        vistos_objetivos = set()
+        for item in objetivos_data:
+            obj_id = item.get('id')
+            if not obj_id or obj_id in vistos_objetivos:
+                continue
+            vistos_objetivos.add(obj_id)
+            if not ObjetivoEstrategico.objects.filter(pk=obj_id).exists():
+                raise serializers.ValidationError({
+                    'objetivos': f'El objetivo {obj_id} no existe en Planificación.'
+                })
+            estado = item.get('estado_avance') or ProyectoObjetivo.ESTADO_NO_INICIADO
+            vinculo, _ = ProyectoObjetivo.objects.update_or_create(
+                proyecto=proyecto,
+                objetivo_id=obj_id,
+                defaults={'estado_avance': estado},
+            )
+            ids_conservados.add(vinculo.id)
+
+        proyecto.objetivos_proyecto.exclude(id__in=ids_conservados).delete()
+
+        primer_vinculo = (
+            proyecto.objetivos_proyecto.select_related('objetivo__programa').order_by('id').first()
+        )
+        if primer_vinculo:
+            proyecto.objetivo_estrategico = primer_vinculo.objetivo
+            proyecto.programa = primer_vinculo.objetivo.programa
+        else:
+            proyecto.objetivo_estrategico = None
+            proyecto.programa = None
+        proyecto.save(update_fields=['objetivo_estrategico', 'programa'])
 
     def _sync_presupuesto_items(self, proyecto, items_data):
         if items_data is None:
@@ -186,6 +265,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         equipo_ids = validated_data.pop('equipo', [])
         items_data = validated_data.pop('presupuesto_items', [])
+        objetivos_data = validated_data.pop('objetivos', None)
         areas_ids = validated_data.pop('areas_ids', None)
         secretarias_ids = validated_data.pop('secretarias_ids', None)
         if areas_ids is None and secretarias_ids is None:
@@ -203,6 +283,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
         for uid in equipo_ids:
             ProyectoEquipo.objects.get_or_create(proyecto=proyecto, usuario_id=uid)
         self._sync_presupuesto_items(proyecto, items_data)
+        self._sync_objetivos(proyecto, objetivos_data)
         from .dependencias import actualizar_bandera_transversal
         actualizar_bandera_transversal(proyecto)
         return proyecto
@@ -210,6 +291,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         equipo_ids = validated_data.pop('equipo', None)
         items_data = validated_data.pop('presupuesto_items', None)
+        objetivos_data = validated_data.pop('objetivos', None)
         areas_ids = validated_data.pop('areas_ids', None)
         secretarias_ids = validated_data.pop('secretarias_ids', None)
         if areas_ids is not None or secretarias_ids is not None:
@@ -230,6 +312,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
             for uid in equipo_ids:
                 ProyectoEquipo.objects.get_or_create(proyecto=proyecto, usuario_id=uid)
         self._sync_presupuesto_items(proyecto, items_data)
+        self._sync_objetivos(proyecto, objetivos_data)
         from .dependencias import actualizar_bandera_transversal
         actualizar_bandera_transversal(proyecto)
         return proyecto
@@ -297,6 +380,16 @@ class ProyectoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     'presupuesto_items': 'La suma de los gastos no puede superar el presupuesto total del proyecto.'
                 })
+        objetivos = initial.get('objetivos')
+        if self.instance is None:
+            if not objetivos or len(objetivos) < 1:
+                raise serializers.ValidationError({
+                    'objetivos': 'Debe asociar al menos un objetivo estratégico.'
+                })
+        elif objetivos is not None and len(objetivos) < 1:
+            raise serializers.ValidationError({
+                'objetivos': 'Debe mantener al menos un objetivo asociado.'
+            })
         return data
 
     class Meta:
@@ -311,6 +404,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
             'areas_ids', 'secretarias_ids', 'areas_asignadas_ids', 'secretarias_asignadas_ids',
             'es_transversal',
             'equipo', 'equipo_nombres', 'presupuesto_items', 'presupuesto_cargado',
+            'objetivos', 'objetivos_asignados', 'avance_objetivos',
         ]
         read_only_fields = ['creado_por', 'fecha_creacion', 'es_transversal']
 
@@ -328,10 +422,13 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
     secretarias_asignadas = serializers.SerializerMethodField()
     area_nombre = serializers.SerializerMethodField()
     equipo_nombres = serializers.SerializerMethodField()
+    avance_objetivos = serializers.SerializerMethodField()
+    objetivos_resumen = serializers.SerializerMethodField()
 
     class Meta:
         model = Proyecto
-        fields = ['id', 'nombre', 'descripcion', 'estado', 'porcentaje_avance', 'fecha_ultima_actualizacion',
+        fields = ['id', 'nombre', 'descripcion', 'estado', 'porcentaje_avance', 'avance_objetivos', 'objetivos_resumen',
+                  'fecha_ultima_actualizacion',
                   'area_ultima_actualizacion', 'usuario_ultima_actualizacion', 'responsable_nombre',
                   'usuario_responsable', 'secretaria', 'secretaria_nombre', 'area', 'area_nombre',
                   'areas_asignadas', 'secretarias_asignadas', 'es_transversal', 'equipo_nombres', 'creado_por',
@@ -429,6 +526,28 @@ class ProyectoDashboardSerializer(serializers.ModelSerializer):
             return [pe.usuario.nombre_completo for pe in equipo_rel.all() if pe.usuario]
         except (TypeError, AttributeError):
             return []
+
+    def get_avance_objetivos(self, obj):
+        rel = getattr(obj, 'objetivos_proyecto', None)
+        if rel is not None:
+            return ProyectoObjetivo.calcular_avance_promedio(rel.all())
+        return ProyectoObjetivo.calcular_avance_promedio(
+            ProyectoObjetivo.objects.filter(proyecto=obj)
+        )
+
+    def get_objetivos_resumen(self, obj):
+        rel = getattr(obj, 'objetivos_proyecto', None)
+        if rel is not None:
+            items = list(rel.all())
+        else:
+            items = list(ProyectoObjetivo.objects.filter(proyecto=obj))
+        no_iniciado, en_progreso, finalizados, total = conteo_objetivos_por_estado(items)
+        return {
+            'total': total,
+            'no_iniciado': no_iniciado,
+            'en_progreso': en_progreso,
+            'finalizados': finalizados,
+        }
 
 
 class ProyectoAreaSerializer(serializers.ModelSerializer):

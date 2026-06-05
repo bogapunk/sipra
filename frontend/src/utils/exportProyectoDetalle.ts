@@ -1,14 +1,27 @@
 import ExcelJS from 'exceljs'
+import {
+  addImageFromDataUrl,
+  createDonutChartDataUrl,
+  createHorizontalBarChartDataUrl,
+} from './exportWorkbook'
 
 interface ProyectoData {
   nombre: string
   descripcion?: string
   estado?: string
   porcentaje_avance?: number
+  avance_objetivos?: number
   presupuesto_total?: number
   fuente_financiamiento?: string
   presupuesto_cargado?: number
   presupuesto_disponible?: number
+}
+
+interface ObjetivoItem {
+  descripcion?: string
+  programa_nombre?: string
+  estado_avance?: string
+  avance_porcentaje?: number
 }
 
 interface Etapa {
@@ -74,6 +87,7 @@ export async function exportarProyectoDetalle(
   indicadores: Indicador[],
   tareas: TareaItem[],
   presupuestoItems: PresupuestoItem[],
+  objetivos: ObjetivoItem[],
   filename: string
 ): Promise<void> {
   const wb = new ExcelJS.Workbook()
@@ -130,6 +144,59 @@ export async function exportarProyectoDetalle(
     })
   } else {
     ws.addRow(['Sin detalle presupuestario'])
+    row++
+  }
+  row++
+
+  // Objetivos del proyecto y sus estados
+  const objetivosResumen = objetivos.reduce(
+    (acc, o) => {
+      const estado = String(o.estado_avance || 'No iniciado')
+      if (estado === 'Finalizado') acc.finalizados += 1
+      else if (estado === 'En progreso') acc.enProgreso += 1
+      else acc.noIniciados += 1
+      return acc
+    },
+    { noIniciados: 0, enProgreso: 0, finalizados: 0 },
+  )
+  const totalObjetivos = objetivos.length
+  const avanceObjetivos = totalObjetivos
+    ? Math.round(((objetivosResumen.enProgreso * 50 + objetivosResumen.finalizados * 100) / totalObjetivos) * 100) / 100
+    : Number(proyecto.avance_objetivos ?? 0)
+
+  ws.addRow(['Objetivos del proyecto'])
+  ws.getRow(row).font = { bold: true, size: 12 }
+  row++
+  ws.addRow(['Avance general de objetivos (%)', String(avanceObjetivos)])
+  row++
+  ws.addRow(['Total de objetivos', String(totalObjetivos)])
+  row++
+  ws.addRow(['No iniciados', String(objetivosResumen.noIniciados)])
+  row++
+  ws.addRow(['En progreso', String(objetivosResumen.enProgreso)])
+  row++
+  ws.addRow(['Finalizados', String(objetivosResumen.finalizados)])
+  row += 2
+
+  ws.addRow(['Detalle de objetivos'])
+  ws.getRow(row).font = { bold: true, size: 12 }
+  row++
+  if (totalObjetivos) {
+    ws.addRow(['#', 'Objetivo', 'Programa', 'Estado', 'Avance %'])
+    ws.getRow(row).eachCell((c) => { c.font = { bold: true }; c.fill = headerStyle.fill })
+    row++
+    objetivos.forEach((o, index) => {
+      ws.addRow([
+        index + 1,
+        o.descripcion || '',
+        o.programa_nombre || '—',
+        o.estado_avance || 'No iniciado',
+        String(o.avance_porcentaje ?? 0),
+      ])
+      row++
+    })
+  } else {
+    ws.addRow(['Sin objetivos asociados'])
     row++
   }
   row++
@@ -276,6 +343,74 @@ export async function exportarProyectoDetalle(
     })
     col.width = Math.min(maxLen + 2, 50)
   })
+
+  // Hoja de gráficos y resúmenes visuales
+  try {
+    const wsGraficos = wb.addWorksheet('Gráficos')
+    wsGraficos.getCell('A1').value = `Resumen visual - ${proyecto.nombre || 'Proyecto'}`
+    wsGraficos.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FF0F172A' } }
+    let chartRow = 3
+
+    const avanceGeneral = Number(proyecto.porcentaje_avance ?? 0)
+    const donutGeneral = createDonutChartDataUrl('Avance general del proyecto', avanceGeneral)
+    if (donutGeneral) {
+      await addImageFromDataUrl(wsGraficos, donutGeneral, `A${chartRow}:H${chartRow + 16}`)
+      chartRow += 18
+    }
+
+    const donutObjetivos = createDonutChartDataUrl('Avance general de objetivos', avanceObjetivos)
+    if (donutObjetivos) {
+      await addImageFromDataUrl(wsGraficos, donutObjetivos, `A${chartRow}:H${chartRow + 16}`)
+      chartRow += 18
+    }
+
+    if (totalObjetivos) {
+      const barrasObjetivos = createHorizontalBarChartDataUrl(
+        'Objetivos por estado',
+        [
+          { label: 'No iniciados', value: objetivosResumen.noIniciados, color: '#94a3b8' },
+          { label: 'En progreso', value: objetivosResumen.enProgreso, color: '#f59e0b' },
+          { label: 'Finalizados', value: objetivosResumen.finalizados, color: '#16a34a' },
+        ],
+        { unit: '', maxItems: 3 },
+      )
+      if (barrasObjetivos) {
+        await addImageFromDataUrl(wsGraficos, barrasObjetivos, `A${chartRow}:H${chartRow + 12}`)
+        chartRow += 14
+      }
+    }
+
+    const semaforo = createHorizontalBarChartDataUrl(
+      'Tareas por estado de vencimiento',
+      [
+        { label: 'Vencidas', value: resumenVencimiento.vencidas, color: '#dc2626' },
+        { label: 'Próximas a vencer', value: resumenVencimiento.proximas, color: '#f59e0b' },
+        { label: 'Dentro del plazo', value: resumenVencimiento.dentro, color: '#16a34a' },
+        { label: 'Sin fecha', value: resumenVencimiento.sinFecha, color: '#94a3b8' },
+      ],
+      { unit: '', maxItems: 4 },
+    )
+    if (semaforo) {
+      await addImageFromDataUrl(wsGraficos, semaforo, `A${chartRow}:H${chartRow + 13}`)
+      chartRow += 15
+    }
+
+    if (tareas.length) {
+      const barrasTareas = createHorizontalBarChartDataUrl(
+        'Avance por tarea',
+        tareas.map((item) => ({
+          label: (item.tarea?.titulo as string) || 'Sin título',
+          value: Number(item.tarea?.porcentaje_avance) || 0,
+        })),
+        { unit: '%', maxItems: 15 },
+      )
+      if (barrasTareas) {
+        await addImageFromDataUrl(wsGraficos, barrasTareas, `A${chartRow}:H${chartRow + 18}`)
+      }
+    }
+  } catch {
+    // Si la generación de imágenes falla, se conserva la exportación de datos.
+  }
 
   const baseName = filename.replace(/\.(csv|xlsx)$/i, '')
   const xlsxFilename = `${baseName}.xlsx`

@@ -145,7 +145,7 @@ class Command(BaseCommand):
             id_eje, nombre_eje = item['eje']
             eje, _ = Eje.objects.update_or_create(
                 id_eje=id_eje,
-                defaults={'nombre_eje': nombre_eje}
+                defaults={'nombre_eje': nombre_eje, 'anio': 2026}
             )
 
             id_plan, nombre_plan, proposito, vision = item['plan']

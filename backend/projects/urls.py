@@ -33,6 +33,11 @@ from dashboards.views import (
     AvancesPorSecretariaView,
     PlanificacionArbolView,
 )
+from projects.planificacion_views import (
+    PlanificacionImportView,
+    PlanificacionPeriodosView,
+    PlanificacionPlantillaView,
+)
 
 router = DefaultRouter()
 router.register("roles", RolViewSet)
@@ -72,6 +77,9 @@ urlpatterns = [
     path("avances/por-area/", AvancesPorAreaView.as_view()),
     path("avances/por-secretaria/", AvancesPorSecretariaView.as_view()),
     path("planificacion/arbol/", PlanificacionArbolView.as_view()),
+    path("planificacion/periodos/", PlanificacionPeriodosView.as_view()),
+    path("planificacion/importar/", PlanificacionImportView.as_view()),
+    path("planificacion/plantilla-importacion/", PlanificacionPlantillaView.as_view()),
     path("backup-restore/backups/", BackupListView.as_view()),
     path("backup-restore/backup/", BackupCreateView.as_view()),
     path("backup-restore/backups/delete/", BackupDeleteView.as_view()),

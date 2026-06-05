@@ -735,6 +735,30 @@ const tareasParaPadre = computed(() => {
   return raices.filter((t: Record<string, unknown>) => (t.id as number) !== id)
 })
 
+async function abrirAsignarDesdeRuta() {
+  const asignId = route.query.asignar
+  if (!asignId) return
+  const id = Number(asignId)
+  if (!id) return
+  try {
+    const res = await api.get(`tareas/${id}/`)
+    openAsignar(res.data as Record<string, unknown>)
+    const nextQuery = { ...route.query }
+    delete nextQuery.asignar
+    router.replace({ path: '/tareas', query: nextQuery })
+  } catch {
+    toast.error('No se pudo cargar la tarea para asignar.')
+  }
+}
+
+async function abrirNuevaDesdeRuta() {
+  if (route.query.nueva !== '1') return
+  await openCreate()
+  const nextQuery = { ...route.query }
+  delete nextQuery.nueva
+  router.replace({ path: '/tareas', query: nextQuery })
+}
+
 async function abrirDetalleDesdeRuta() {
   const verId = route.query.ver
   if (!verId) return
@@ -798,6 +822,8 @@ onMounted(async () => {
   await Promise.all([load(1), loadResumenGlobal()])
   await abrirDetalleDesdeRuta()
   await abrirEdicionDesdeRuta()
+  await abrirAsignarDesdeRuta()
+  await abrirNuevaDesdeRuta()
 })
 
 watch(() => route.query.ver, async () => {
@@ -806,6 +832,14 @@ watch(() => route.query.ver, async () => {
 
 watch(() => route.query.editar, async () => {
   await abrirEdicionDesdeRuta()
+})
+
+watch(() => route.query.asignar, async () => {
+  await abrirAsignarDesdeRuta()
+})
+
+watch(() => route.query.nueva, async () => {
+  await abrirNuevaDesdeRuta()
 })
 </script>
 

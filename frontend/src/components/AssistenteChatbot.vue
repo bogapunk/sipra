@@ -5,7 +5,9 @@ import { useAuth } from '@/composables/useAuth'
 import { obtenerAyuda } from '@/data/ayudaContextual'
 import {
   buscarRespuesta,
+  obtenerRelacionadas,
   obtenerSugerenciasPorRuta,
+  sugerenciasInteligentes,
   type RespuestaChatbot,
 } from '@/data/baseConocimientoChatbot'
 
@@ -14,11 +16,12 @@ const { user } = useAuth()
 const mostrarChatbot = computed(() => !!user.value)
 const abierto = ref(false)
 const pregunta = ref('')
-const mensajes = ref<{ tipo: 'usuario' | 'bot'; texto: string; respuesta?: RespuestaChatbot }[]>([])
+const mensajes = ref<{ tipo: 'usuario' | 'bot'; texto: string; respuesta?: RespuestaChatbot; relacionadas?: string[] }[]>([])
 const enviando = ref(false)
 
 const ayudaContextual = computed(() => obtenerAyuda(route.path))
 const sugerencias = computed(() => obtenerSugerenciasPorRuta(route.path))
+const autocompletado = computed(() => sugerenciasInteligentes(pregunta.value))
 
 watch(() => route.path, () => {
   if (abierto.value) {
@@ -58,11 +61,14 @@ function enviarPregunta() {
       tipo: 'bot',
       texto: formatearRespuesta(respuesta),
       respuesta,
+      relacionadas: obtenerRelacionadas(texto),
     })
   } else {
+    const sugeridas = sugerenciasInteligentes(texto, 4)
     mensajes.value.push({
       tipo: 'bot',
-      texto: 'No encontré una respuesta específica para su pregunta. Intente reformularla o elija una de las sugerencias según el módulo actual. También puede revisar la ayuda contextual de esta pantalla.',
+      texto: 'No encontré una respuesta exacta. Puede reformular su pregunta o probar con alguno de estos temas relacionados. También puede revisar la ayuda contextual de esta pantalla.',
+      relacionadas: sugeridas.length ? sugeridas : sugerencias.value.slice(0, 4),
     })
   }
   enviando.value = false
@@ -75,6 +81,11 @@ function enviarPregunta() {
 
 function usarSugerencia(s: string) {
   pregunta.value = s
+}
+
+function preguntarDirecto(s: string) {
+  pregunta.value = s
+  enviarPregunta()
 }
 
 function limpiarChat() {
@@ -118,11 +129,21 @@ function limpiarChat() {
                 :class="m.tipo"
               >
                 <span v-if="m.tipo === 'usuario'" class="mensaje-texto">{{ m.texto }}</span>
-                <span
-                  v-else
-                  class="mensaje-texto bot-html"
-                  v-html="m.texto"
-                />
+                <template v-else>
+                  <span class="mensaje-texto bot-html" v-html="m.texto" />
+                  <div v-if="m.relacionadas?.length" class="relacionadas">
+                    <span class="relacionadas-titulo">Preguntas relacionadas:</span>
+                    <button
+                      v-for="(rel, j) in m.relacionadas"
+                      :key="j"
+                      type="button"
+                      class="btn-relacionada"
+                      @click="preguntarDirecto(rel)"
+                    >
+                      {{ rel }}
+                    </button>
+                  </div>
+                </template>
               </div>
             </div>
 
@@ -139,6 +160,18 @@ function limpiarChat() {
                   {{ s }}
                 </button>
               </div>
+            </div>
+
+            <div v-if="autocompletado.length && mensajes.length" class="autocompletado">
+              <button
+                v-for="(s, i) in autocompletado"
+                :key="i"
+                type="button"
+                class="btn-autocompletado"
+                @click="preguntarDirecto(s)"
+              >
+                {{ s }}
+              </button>
             </div>
 
             <form class="chat-form" @submit.prevent="enviarPregunta">
@@ -324,6 +357,58 @@ function limpiarChat() {
 .bot-html :deep(.modulo-tag) {
   font-size: 0.75rem;
   color: #94a3b8;
+}
+
+.relacionadas {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #e2e8f0;
+}
+.relacionadas-titulo {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+}
+.btn-relacionada {
+  text-align: left;
+  padding: 0.35rem 0.55rem;
+  background: #f0f9ff;
+  border: 1px solid #e0f2fe;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #0369a1;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.btn-relacionada:hover {
+  background: #e0f2fe;
+  border-color: #0d47a1;
+}
+.autocompletado {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+.btn-autocompletado {
+  padding: 0.3rem 0.55rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.btn-autocompletado:hover {
+  background: #f0f9ff;
+  border-color: #0d47a1;
+  color: #0d47a1;
 }
 
 .chat-bienvenida p {

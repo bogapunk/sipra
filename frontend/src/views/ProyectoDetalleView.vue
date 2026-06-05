@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onActivated, onDeactivated, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getProyecto } from '@/services/proyectos'
-import { getTareas } from '@/services/tareas'
+import { getProyectoVistaDetalle } from '@/services/proyectos'
 import { api } from '@/services/api'
 import { useAuth } from '@/composables/useAuth'
 import { useToast } from '@/composables/useToast'
@@ -17,6 +16,24 @@ import LoaderSpinner from '@/components/LoaderSpinner.vue'
 import IconDownload from '@/components/icons/IconDownload.vue'
 import IconEdit from '@/components/icons/IconEdit.vue'
 import IconTrash from '@/components/icons/IconTrash.vue'
+import IconPlus from '@/components/icons/IconPlus.vue'
+import IconEye from '@/components/icons/IconEye.vue'
+import TareaModalesHost from '@/components/tareas/TareaModalesHost.vue'
+
+type RendimientoDetalle = {
+  proyecto_ms?: number
+  tareas_ms?: number
+  auxiliares_ms?: number
+  total_ms?: number
+}
+
+type EstadoAvanceObjetivo = 'No iniciado' | 'En progreso' | 'Finalizado'
+
+const AVANCE_POR_ESTADO_OBJETIVO: Record<EstadoAvanceObjetivo, number> = {
+  'No iniciado': 0,
+  'En progreso': 50,
+  'Finalizado': 100,
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -24,8 +41,12 @@ const toast = useToast()
 const { user, isAdmin, isVisualizador } = useAuth()
 const { confirmDelete } = useConfirmDelete()
 const proyecto = ref<Record<string, unknown> | null>(null)
-const areasCatalogo = ref<Record<string, unknown>[]>([])
-const secretariasCatalogo = ref<Record<string, unknown>[]>([])
+const dependenciasDetalle = ref<{ areas: { id: number; nombre: string }[]; secretarias: { id: number; nombre: string }[] }>({
+  areas: [],
+  secretarias: [],
+})
+const rendimiento = ref<RendimientoDetalle | null>(null)
+const rendimientoClienteMs = ref<number | null>(null)
 const carga = ref(true)
 const errorCarga = ref('')
 const tareas = ref<Record<string, unknown>[]>([])
@@ -42,6 +63,7 @@ const modoOrden = ref(false)
 const guardandoOrden = ref(false)
 const draggedTaskId = ref<number | null>(null)
 const dragOverTaskId = ref<number | null>(null)
+const tareaModalesRef = ref<InstanceType<typeof TareaModalesHost> | null>(null)
 const currencyFormatter = new Intl.NumberFormat('es-AR', {
   style: 'currency',
   currency: 'ARS',
@@ -85,23 +107,25 @@ const load = async () => {
   const id = proyectoId.value
   carga.value = true
   errorCarga.value = ''
+  const tClienteInicio = performance.now()
   try {
-    const [proyRes, tareasRes, etapasRes, indRes, adjRes, areasRes, secRes] = await Promise.all([
-      getProyecto(id),
-      getTareas({ proyecto: id, _ts: Date.now() }),
-      api.get('etapas/', { params: { proyecto: id } }),
-      api.get('indicadores/', { params: { proyecto: id } }),
-      api.get('adjuntos-proyecto/', { params: { proyecto: id } }),
-      api.get('areas/').catch(() => ({ data: [] })),
-      api.get('secretarias/').catch(() => ({ data: [] })),
-    ])
-    areasCatalogo.value = Array.isArray(areasRes.data) ? areasRes.data : []
-    secretariasCatalogo.value = Array.isArray(secRes.data) ? secRes.data : []
-    proyecto.value = proyRes.data as Record<string, unknown>
-    tareas.value = parseListResponse(tareasRes.data)
-    etapas.value = parseListResponse(etapasRes.data)
-    indicadores.value = Array.isArray(indRes.data) ? indRes.data : (indRes.data?.results || [])
-    adjuntos.value = Array.isArray(adjRes.data) ? adjRes.data : (adjRes.data?.results || [])
+    const res = await getProyectoVistaDetalle(id)
+    const data = res.data as Record<string, unknown>
+    proyecto.value = data.proyecto as Record<string, unknown>
+    tareas.value = parseListResponse(data.tareas)
+    etapas.value = parseListResponse(data.etapas)
+    indicadores.value = parseListResponse(data.indicadores)
+    adjuntos.value = parseListResponse(data.adjuntos)
+    const dep = data.dependencias as { areas?: { id: number; nombre: string }[]; secretarias?: { id: number; nombre: string }[] } | undefined
+    dependenciasDetalle.value = {
+      areas: dep?.areas || [],
+      secretarias: dep?.secretarias || [],
+    }
+    rendimiento.value = (data._rendimiento as RendimientoDetalle) || null
+    rendimientoClienteMs.value = Math.round(performance.now() - tClienteInicio)
+    if (import.meta.env.DEV) {
+      console.info(`[ProyectoDetalle] carga cliente: ${rendimientoClienteMs.value} ms`, rendimiento.value)
+    }
   } catch (e) {
     const err = e as { response?: { status?: number } }
     proyecto.value = null
@@ -299,40 +323,87 @@ const tareasPorVencimiento = computed(() => {
   return { vencidas, proximas, dentro }
 })
 
-const dependenciasListado = computed(() => {
-  const p = proyecto.value
-  if (!p) {
-    return { areas: [] as { id: number; nombre: string }[], secretarias: [] as { id: number; nombre: string }[] }
-  }
-  const areaIds = new Set<number>()
-  const idsRaw = p.areas_asignadas_ids
-  if (Array.isArray(idsRaw)) {
-    idsRaw.forEach((x) => {
-      const n = Number(x)
-      if (Number.isFinite(n)) areaIds.add(n)
-    })
-  }
-  const secIds = new Set<number>()
-  const secRaw = p.secretarias_asignadas_ids
-  if (Array.isArray(secRaw)) {
-    secRaw.forEach((x) => {
-      const n = Number(x)
-      if (Number.isFinite(n)) secIds.add(n)
-    })
-  }
-  const areas = [...areaIds].map((id) => {
-    const row = areasCatalogo.value.find((a) => Number(a.id) === id)
-    return { id, nombre: String(row?.nombre || `Área ${id}`) }
-  })
-  const secretarias = [...secIds].map((id) => {
-    const row = secretariasCatalogo.value.find((s) => Number(s.id) === id)
-    const codigo = row ? String(row.codigo || '').trim() : ''
-    const nombre = row ? String(row.nombre || '').trim() : ''
-    const label = codigo && nombre ? `${codigo} — ${nombre}` : (nombre || codigo || `Secretaría ${id}`)
-    return { id, nombre: label }
-  })
-  return { areas, secretarias }
+const dependenciasListado = computed(() => dependenciasDetalle.value)
+
+const objetivosAsignados = computed(() => {
+  const raw = proyecto.value?.objetivos_asignados
+  return Array.isArray(raw) ? (raw as Record<string, unknown>[]) : []
 })
+
+const avanceObjetivos = computed(() => Number(proyecto.value?.avance_objetivos) || 0)
+
+const resumenObjetivos = computed(() => {
+  const lista = objetivosAsignados.value
+  const total = lista.length
+  const finalizados = lista.filter((o) => String(o.estado_avance) === 'Finalizado').length
+  const enProgreso = lista.filter((o) => String(o.estado_avance) === 'En progreso').length
+  const noIniciados = total - finalizados - enProgreso
+  return { total, finalizados, enProgreso, noIniciados }
+})
+
+function claseEstadoObjetivo(estado: unknown): string {
+  const e = String(estado || 'No iniciado')
+  if (e === 'Finalizado') return 'obj-estado-finalizado'
+  if (e === 'En progreso') return 'obj-estado-progreso'
+  return 'obj-estado-no-iniciado'
+}
+
+function pctObjetivo(estado: unknown): number {
+  return AVANCE_POR_ESTADO_OBJETIVO[String(estado || 'No iniciado') as EstadoAvanceObjetivo] ?? 0
+}
+
+function findTareaEnProyecto(tareaId: number): Record<string, unknown> | null {
+  return tareas.value.find((t) => Number(t.id) === tareaId) ?? null
+}
+
+async function resolverTarea(tareaId: number): Promise<Record<string, unknown>> {
+  const local = findTareaEnProyecto(tareaId)
+  if (local) return local
+  const res = await api.get(`tareas/${tareaId}/`)
+  return res.data as Record<string, unknown>
+}
+
+function irNuevaTarea() {
+  tareaModalesRef.value?.openCreate()
+}
+
+async function irVerTarea(tareaId: number) {
+  try {
+    const t = await resolverTarea(tareaId)
+    tareaModalesRef.value?.openVer(t)
+  } catch {
+    toast.error('No se pudo cargar el detalle de la tarea.')
+  }
+}
+
+async function irEditarTarea(tareaId: number) {
+  try {
+    const t = await resolverTarea(tareaId)
+    await tareaModalesRef.value?.openEdit(t)
+  } catch {
+    toast.error('No se pudo cargar la tarea para editar.')
+  }
+}
+
+async function irAsignarTarea(tareaId: number) {
+  try {
+    const t = await resolverTarea(tareaId)
+    await tareaModalesRef.value?.openAsignar(t)
+  } catch {
+    toast.error('No se pudo cargar la tarea para asignar.')
+  }
+}
+
+async function onTareasModalesUpdated() {
+  try {
+    const res = await getProyectoVistaDetalle(proyectoId.value, true)
+    const data = res.data as Record<string, unknown>
+    proyecto.value = data.proyecto as Record<string, unknown>
+    tareas.value = parseListResponse(data.tareas)
+  } catch {
+    toast.error('No se pudieron actualizar las tareas.')
+  }
+}
 
 const tieneDependenciasDetalle = computed(() => {
   const d = dependenciasListado.value
@@ -380,6 +451,7 @@ async function exportarExcel() {
         descripcion: proyecto.value.descripcion as string,
         estado: proyecto.value.estado as string,
         porcentaje_avance: Number(proyecto.value.porcentaje_avance) || 0,
+        avance_objetivos: avanceObjetivos.value,
         presupuesto_total: Number(proyecto.value.presupuesto_total) || 0,
         fuente_financiamiento: proyecto.value.fuente_financiamiento as string,
         presupuesto_cargado: presupuestoCargado.value,
@@ -399,6 +471,12 @@ async function exportarExcel() {
         detalle: item.detalle as string | undefined,
         orden: (item.orden as number | undefined) ?? index + 1,
       })),
+      objetivosAsignados.value.map((o) => ({
+        descripcion: o.descripcion as string | undefined,
+        programa_nombre: o.programa_nombre as string | undefined,
+        estado_avance: o.estado_avance as string | undefined,
+        avance_porcentaje: Number(o.avance_porcentaje) || 0,
+      })),
       `proyecto_${String(proyecto.value.nombre || 'proyecto').replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_').trim().slice(0, 80) || proyectoId}`
     )
     toast.success('Exportado correctamente.')
@@ -409,8 +487,9 @@ async function exportarExcel() {
 
 async function actualizarTareas() {
   try {
-    const res = await getTareas({ proyecto: proyectoId.value, _ts: Date.now() })
-    tareas.value = parseListResponse(res.data)
+    const res = await getProyectoVistaDetalle(proyectoId.value, true)
+    tareas.value = parseListResponse((res.data as Record<string, unknown>).tareas)
+    rendimiento.value = ((res.data as Record<string, unknown>)._rendimiento as RendimientoDetalle) || rendimiento.value
     toast.success('Tareas actualizadas.')
   } catch {
     toast.error('No se pudieron actualizar las tareas.')
@@ -419,8 +498,8 @@ async function actualizarTareas() {
 
 async function actualizarTareasSilencioso() {
   try {
-    const res = await getTareas({ proyecto: proyectoId.value, _ts: Date.now() })
-    tareas.value = parseListResponse(res.data)
+    const res = await getProyectoVistaDetalle(proyectoId.value, true)
+    tareas.value = parseListResponse((res.data as Record<string, unknown>).tareas)
   } catch {
     // Sin ruido visual: es auto-refresh.
   }
@@ -512,7 +591,62 @@ watch(proyectoId, () => {
       </div>
     </div>
     <p class="desc">{{ proyecto.descripcion }}</p>
-    <p><strong>Estado:</strong> {{ proyecto.estado }} | <strong>Avance general:</strong> {{ avanceGeneral.toFixed(2) }}%</p>
+    <div class="resumen-proyecto-meta">
+      <p>
+        <strong>Estado:</strong> {{ proyecto.estado }}
+        · <strong>Avance tareas:</strong> {{ avanceGeneral.toFixed(2) }}%
+        <template v-if="objetivosAsignados.length">
+          · <strong>Avance objetivos:</strong> {{ avanceObjetivos.toFixed(0) }}%
+        </template>
+      </p>
+      <p v-if="rendimiento?.total_ms != null" class="rendimiento-badge" title="Tiempos medidos en el servidor. Ver docs/RENDIMIENTO_VISTA_DETALLE_PROYECTO.md">
+        Carga servidor: {{ rendimiento.total_ms }} ms
+        <span class="rendimiento-detalle">
+          (proyecto {{ rendimiento.proyecto_ms }} · tareas {{ rendimiento.tareas_ms }} · aux {{ rendimiento.auxiliares_ms }})
+        </span>
+        <span v-if="rendimientoClienteMs != null" class="rendimiento-cliente"> · cliente {{ rendimientoClienteMs }} ms</span>
+      </p>
+    </div>
+
+    <section v-if="objetivosAsignados.length" class="section objetivos-detalle-section">
+      <h2>Objetivos estratégicos</h2>
+      <p class="hint">Seguimiento por cumplimiento de objetivos vinculados desde Planificación.</p>
+      <div class="objetivos-detalle-layout">
+        <div class="objetivos-detalle-resumen">
+          <PieChart :value="avanceObjetivos" label="Avance objetivos" :size="130" />
+          <div class="objetivos-contadores">
+            <span class="obj-contador obj-contador-finalizado">{{ resumenObjetivos.finalizados }} finalizados</span>
+            <span class="obj-contador obj-contador-progreso">{{ resumenObjetivos.enProgreso }} en progreso</span>
+            <span class="obj-contador obj-contador-no-iniciado">{{ resumenObjetivos.noIniciados }} no iniciados</span>
+          </div>
+        </div>
+        <div class="objetivos-detalle-lista">
+          <article
+            v-for="obj in objetivosAsignados"
+            :key="(obj.objetivo_id as number) || (obj.id as number)"
+            class="objetivo-detalle-card"
+          >
+            <div class="objetivo-detalle-texto">
+              <span v-if="obj.programa_nombre" class="objetivo-programa-tag">{{ obj.programa_nombre }}</span>
+              <p class="objetivo-detalle-desc">{{ obj.descripcion }}</p>
+            </div>
+            <div class="objetivo-detalle-avance">
+              <span class="objetivo-estado-chip" :class="claseEstadoObjetivo(obj.estado_avance)">
+                {{ obj.estado_avance || 'No iniciado' }}
+              </span>
+              <div class="objetivo-bar-wrap">
+                <div
+                  class="objetivo-bar-fill"
+                  :class="claseEstadoObjetivo(obj.estado_avance)"
+                  :style="{ width: `${pctObjetivo(obj.estado_avance)}%` }"
+                />
+              </div>
+              <span class="objetivo-pct">{{ pctObjetivo(obj.estado_avance) }}%</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
 
     <section v-if="tieneDependenciasDetalle" class="section asignaciones-detalle-section">
       <h2>Dependencias organizacionales</h2>
@@ -670,7 +804,12 @@ watch(proyectoId, () => {
     </section>
 
     <section class="section">
-      <h2>Tareas</h2>
+      <div class="tareas-section-header">
+        <h2>Tareas</h2>
+        <button v-if="!isVisualizador" type="button" class="btn-nueva-tarea" @click="irNuevaTarea">
+          <IconPlus class="btn-icon-sm" /> Agregar nueva tarea
+        </button>
+      </div>
       <div class="orden-actions" v-if="!isVisualizador">
         <button type="button" class="btn-orden" @click="modoOrden = !modoOrden">
           {{ modoOrden ? 'Finalizar ordenamiento' : 'Acomodar orden' }}
@@ -728,8 +867,12 @@ watch(proyectoId, () => {
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
-              <td class="col-acciones">
-                <router-link :to="`/tareas?ver=${item.tarea.id}`" class="btn-ver-detalle">Ver detalle</router-link>
+              <td class="col-acciones detalle-acciones-cell">
+                <button type="button" class="btn-action btn-action-compact btn-action-ver" title="Ver" @click.stop="irVerTarea(item.tarea.id as number)"><IconEye class="btn-icon-sm" /> Ver</button>
+                <template v-if="!isVisualizador">
+                  <button type="button" class="btn-action btn-action-compact btn-action-editar" title="Editar" @click.stop="irEditarTarea(item.tarea.id as number)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                  <button type="button" class="btn-action btn-action-compact btn-action-asignar" title="Asignar" @click.stop="irAsignarTarea(item.tarea.id as number)"><IconPlus class="btn-icon-sm" /> Asignar</button>
+                </template>
               </td>
               <td v-if="modoOrden && !isVisualizador" class="orden-col">
                 <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
@@ -786,8 +929,12 @@ watch(proyectoId, () => {
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
-              <td class="col-acciones">
-                <router-link :to="`/tareas?ver=${item.tarea.id}`" class="btn-ver-detalle">Ver detalle</router-link>
+              <td class="col-acciones detalle-acciones-cell">
+                <button type="button" class="btn-action btn-action-compact btn-action-ver" title="Ver" @click.stop="irVerTarea(item.tarea.id as number)"><IconEye class="btn-icon-sm" /> Ver</button>
+                <template v-if="!isVisualizador">
+                  <button type="button" class="btn-action btn-action-compact btn-action-editar" title="Editar" @click.stop="irEditarTarea(item.tarea.id as number)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                  <button type="button" class="btn-action btn-action-compact btn-action-asignar" title="Asignar" @click.stop="irAsignarTarea(item.tarea.id as number)"><IconPlus class="btn-icon-sm" /> Asignar</button>
+                </template>
               </td>
               <td v-if="modoOrden && !isVisualizador" class="orden-col">
                 <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
@@ -844,8 +991,12 @@ watch(proyectoId, () => {
                 </span>
                 <span v-else class="vencimiento-sin">—</span>
               </td>
-              <td class="col-acciones">
-                <router-link :to="`/tareas?ver=${item.tarea.id}`" class="btn-ver-detalle">Ver detalle</router-link>
+              <td class="col-acciones detalle-acciones-cell">
+                <button type="button" class="btn-action btn-action-compact btn-action-ver" title="Ver" @click.stop="irVerTarea(item.tarea.id as number)"><IconEye class="btn-icon-sm" /> Ver</button>
+                <template v-if="!isVisualizador">
+                  <button type="button" class="btn-action btn-action-compact btn-action-editar" title="Editar" @click.stop="irEditarTarea(item.tarea.id as number)"><IconEdit class="btn-icon-sm" /> Editar</button>
+                  <button type="button" class="btn-action btn-action-compact btn-action-asignar" title="Asignar" @click.stop="irAsignarTarea(item.tarea.id as number)"><IconPlus class="btn-icon-sm" /> Asignar</button>
+                </template>
               </td>
               <td v-if="modoOrden && !isVisualizador" class="orden-col">
                 <span class="drag-handle" title="Arrastrar para reordenar">↕ Arrastrar</span>
@@ -858,6 +1009,13 @@ watch(proyectoId, () => {
 
       <p v-if="!tareasParaTabla.length" class="hint">Sin tareas en este proyecto.</p>
     </section>
+
+    <TareaModalesHost
+      ref="tareaModalesRef"
+      :proyecto-id="proyectoId"
+      :proyecto-nombre="String(proyecto?.nombre || '')"
+      @updated="onTareasModalesUpdated"
+    />
   </div>
 </template>
 
@@ -935,11 +1093,11 @@ watch(proyectoId, () => {
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { padding: 0.5rem; text-align: left; }
 .table th.col-avance,
-.table td.col-avance { text-align: center; }
+.table td.col-avance { text-align: center; width: 4.5rem; }
 .table th.col-fecha,
-.table td.col-fecha { white-space: nowrap; font-size: 0.9rem; }
+.table td.col-fecha { white-space: nowrap; font-size: 0.82rem; width: 6.5rem; }
 .table th.col-organizacion,
-.table td.col-organizacion { font-size: 0.88rem; max-width: 14rem; line-height: 1.35; }
+.table td.col-organizacion { font-size: 0.82rem; max-width: 9.5rem; line-height: 1.35; }
 .section .btn-primary {
   padding: 0.5rem 1rem;
   background: #3b82f6;
@@ -1031,7 +1189,7 @@ watch(proyectoId, () => {
 .tareas-vencidas .grupo-titulo { color: #b91c1c; }
 .tareas-proximas .grupo-titulo { color: #a16207; }
 .tareas-dentro .grupo-titulo { color: #15803d; }
-.col-orden { width: 4rem; text-align: center; font-weight: 600; }
+.col-orden { width: 3rem; text-align: center; font-weight: 600; font-size: 0.85rem; }
 .orden-actions { margin: 0.5rem 0; }
 .btn-orden {
   display: inline-flex;
@@ -1278,7 +1436,142 @@ watch(proyectoId, () => {
 .adjunto-link:hover { text-decoration: underline; }
 .adjunto-upload input[type="file"] { font-size: 0.85rem; }
 .adjunto-loading { font-size: 0.85rem; color: #64748b; margin-left: 0.5rem; }
-.col-acciones { white-space: nowrap; min-width: 6rem; }
+.col-acciones { white-space: nowrap; min-width: 7.5rem; width: 7.5rem; vertical-align: top; }
+.detalle-acciones-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: stretch;
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+}
+.detalle-acciones-cell .btn-action-compact {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.7rem;
+  padding: 0.22rem 0.3rem;
+  margin: 0;
+}
+.detalle-acciones-cell .btn-action-compact .btn-icon-sm {
+  width: 12px;
+  height: 12px;
+}
+.resumen-proyecto-meta { margin-bottom: 1rem; }
+.resumen-proyecto-meta p { margin: 0.25rem 0; }
+.rendimiento-badge {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+.rendimiento-detalle { color: #64748b; }
+.rendimiento-cliente { color: #6366f1; }
+.tareas-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.tareas-section-header h2 { margin: 0; }
+.btn-nueva-tarea {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-nueva-tarea:hover { background: #1d4ed8; }
+.objetivos-detalle-section {
+  padding: 1.1rem 1.2rem;
+  background: linear-gradient(135deg, #faf5ff 0%, #f8fafc 100%);
+  border: 1px solid #e9d5ff;
+  border-radius: 14px;
+}
+.objetivos-detalle-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: 1.25rem;
+  margin-top: 1rem;
+  align-items: start;
+}
+.objetivos-detalle-resumen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e9d5ff;
+}
+.objetivos-contadores { display: flex; flex-direction: column; gap: 0.35rem; width: 100%; }
+.obj-contador {
+  display: block;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+}
+.obj-contador-finalizado { background: #dcfce7; color: #15803d; }
+.obj-contador-progreso { background: #fef9c3; color: #a16207; }
+.obj-contador-no-iniciado { background: #f1f5f9; color: #64748b; }
+.objetivos-detalle-lista { display: flex; flex-direction: column; gap: 0.65rem; }
+.objetivo-detalle-card {
+  display: grid;
+  grid-template-columns: 1fr minmax(140px, 180px);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 0.85rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.objetivo-programa-tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #7c3aed;
+  margin-bottom: 0.25rem;
+}
+.objetivo-detalle-desc { margin: 0; font-size: 0.88rem; line-height: 1.4; color: #1e293b; }
+.objetivo-detalle-avance { display: flex; flex-direction: column; gap: 0.35rem; }
+.objetivo-estado-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.obj-estado-no-iniciado { background: #f1f5f9; color: #64748b; }
+.obj-estado-progreso { background: #fef9c3; color: #a16207; }
+.obj-estado-finalizado { background: #dcfce7; color: #15803d; }
+.objetivo-bar-wrap {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.objetivo-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+.objetivo-bar-fill.obj-estado-no-iniciado { background: #94a3b8; }
+.objetivo-bar-fill.obj-estado-progreso { background: #eab308; }
+.objetivo-bar-fill.obj-estado-finalizado { background: #22c55e; }
+.objetivo-pct { font-size: 0.78rem; font-weight: 700; color: #475569; text-align: right; }
 .btn-ver-detalle {
   display: inline-block;
   padding: 0.25rem 0.5rem;
@@ -1302,6 +1595,13 @@ watch(proyectoId, () => {
     flex-direction: column;
     align-items: flex-start;
   }
+  .objetivos-detalle-layout {
+    grid-template-columns: 1fr;
+  }
+  .objetivo-detalle-card {
+    grid-template-columns: 1fr;
+  }
+  .col-acciones { min-width: 6.5rem; width: 6.5rem; }
 }
 
 </style>

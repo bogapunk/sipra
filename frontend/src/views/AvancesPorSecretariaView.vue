@@ -5,17 +5,46 @@ import { formatFechaHora } from '@/utils/fecha'
 import { comentariosPorIdHistorial } from '@/utils/historialComentarios'
 import GraficoTorta from '@/components/GraficoTorta.vue'
 import GraficoBarrasTareas from '@/components/GraficoBarrasTareas.vue'
+import ObjetivosResumenGrupo from '@/components/dashboard/ObjetivosResumenGrupo.vue'
 import LoaderSpinner from '@/components/LoaderSpinner.vue'
+
+type ObjetivosGrupo = {
+  total?: number
+  no_iniciado?: number
+  en_progreso?: number
+  finalizado?: number
+  avance?: number
+}
 
 function avancePromedioGrupo(tareas: Record<string, unknown>[]): number {
   if (!tareas?.length) return 0
   const sum = tareas.reduce((a, t) => a + (Number(t.porcentaje_avance) || 0), 0)
   return sum / tareas.length
 }
+
+function objetivosDeGrupo(grupo: { objetivos?: ObjetivosGrupo }): ObjetivosGrupo {
+  return grupo?.objetivos || { total: 0, no_iniciado: 0, en_progreso: 0, finalizado: 0, avance: 0 }
+}
+
+function consolidarObjetivos(grupos: { objetivos?: ObjetivosGrupo }[]): ObjetivosGrupo {
+  const acc = { total: 0, no_iniciado: 0, en_progreso: 0, finalizado: 0, avance: 0 }
+  for (const g of grupos) {
+    const o = objetivosDeGrupo(g)
+    acc.total += Number(o.total || 0)
+    acc.no_iniciado += Number(o.no_iniciado || 0)
+    acc.en_progreso += Number(o.en_progreso || 0)
+    acc.finalizado += Number(o.finalizado || 0)
+  }
+  acc.avance = acc.total
+    ? Math.round(((acc.en_progreso * 50 + acc.finalizado * 100) / acc.total) * 100) / 100
+    : 0
+  return acc
+}
+
 const carga = ref(true)
 const error = ref(false)
 const buscarSecretaria = ref('')
-const datos = ref<{ secretarias: { secretaria: string; tareas: Record<string, unknown>[] }[] }>({ secretarias: [] })
+const datos = ref<{ secretarias: { secretaria: string; tareas: Record<string, unknown>[]; objetivos?: ObjetivosGrupo }[] }>({ secretarias: [] })
 const tareaSeleccionada = ref<Record<string, unknown> | null>(null)
 const historialTarea = ref<Record<string, unknown>[]>([])
 const comentariosTareaDetalle = ref<Record<string, unknown>[]>([])
@@ -101,7 +130,7 @@ function cerrarDetalleTarea() {
 const secretariasFiltradas = computed(() => {
   const q = buscarSecretaria.value.trim().toLowerCase()
   if (!q) return datos.value.secretarias || []
-  return (datos.value.secretarias || []).map((g: { secretaria: string; tareas?: Record<string, unknown>[] }) => {
+  return (datos.value.secretarias || []).map((g: { secretaria: string; tareas?: Record<string, unknown>[]; objetivos?: ObjetivosGrupo }) => {
     const tareasMatch = (g.tareas || []).filter((t: Record<string, unknown>) => {
       const tit = String(t.titulo || '').toLowerCase()
       const proy = String(t.proyecto_nombre || '').toLowerCase()
@@ -111,8 +140,10 @@ const secretariasFiltradas = computed(() => {
     if (secMatch) return { ...g, tareas: g.tareas }
     if (tareasMatch.length) return { ...g, tareas: tareasMatch }
     return null
-  }).filter(Boolean) as { secretaria: string; tareas: Record<string, unknown>[] }[]
+  }).filter(Boolean) as { secretaria: string; tareas: Record<string, unknown>[]; objetivos?: ObjetivosGrupo }[]
 })
+
+const objetivosConsolidados = computed(() => consolidarObjetivos(secretariasFiltradas.value))
 
 const todasLasTareas = computed(() => {
   return (secretariasFiltradas.value || []).flatMap((g: { tareas?: Record<string, unknown>[] }) => g.tareas || [])
@@ -122,11 +153,12 @@ const avanceGlobal = computed(() => avancePromedioGrupo(todasLasTareas.value))
 const resumenAvances = computed(() => {
   const tareas = todasLasTareas.value
   const actualizadas = tareas.filter((t) => t.ultimo_incremento != null).length
+  const obj = objetivosConsolidados.value
   return [
     { key: 'secretarias', title: 'Secretarias visibles', value: secretariasFiltradas.value.length, meta: 'Grupos incluidos en la vista', tone: 'neutral' },
     { key: 'tareas', title: 'Tareas visibles', value: tareas.length, meta: 'Tareas consideradas en el resumen', tone: 'info' },
     { key: 'avance', title: 'Avance promedio', value: `${avanceGlobal.value.toFixed(1)}%`, meta: 'Promedio general consolidado', tone: 'success' },
-    { key: 'actualizadas', title: 'Con actualizacion', value: actualizadas, meta: 'Tareas con ultimo incremento registrado', tone: 'warning' },
+    { key: 'objetivos', title: 'Objetivos', value: obj.total ?? 0, meta: `${obj.avance ?? 0}% avance · ${obj.finalizado ?? 0} finalizados`, tone: 'warning' },
   ]
 })
 
@@ -155,14 +187,34 @@ async function exportarReporte() {
     ['Tareas visibles', todasLasTareas.value.length],
     ['Avance promedio', `${avanceGlobal.value.toFixed(1)}%`],
   ], row)
+  row = addTable(
+    resumen,
+    ['Secretaria', 'Tareas', 'Avance promedio %', 'Objetivos', 'No iniciados', 'En progreso', 'Finalizados', 'Avance objetivos %'],
+    secretariasFiltradas.value.map((grupo) => {
+      const o = objetivosDeGrupo(grupo)
+      return [
+        grupo.secretaria,
+        grupo.tareas?.length || 0,
+        avancePromedioGrupo(grupo.tareas || []).toFixed(1),
+        Number(o.total || 0),
+        Number(o.no_iniciado || 0),
+        Number(o.en_progreso || 0),
+        Number(o.finalizado || 0),
+        Number(o.avance || 0),
+      ]
+    }),
+    row,
+  )
   addTable(
     resumen,
-    ['Secretaria', 'Tareas', 'Avance promedio %'],
-    secretariasFiltradas.value.map((grupo) => [
-      grupo.secretaria,
-      grupo.tareas?.length || 0,
-      avancePromedioGrupo(grupo.tareas || []).toFixed(1),
-    ]),
+    ['Resumen de objetivos (todas las secretarias)', 'Valor'],
+    [
+      ['Objetivos totales', objetivosConsolidados.value.total],
+      ['No iniciados', objetivosConsolidados.value.no_iniciado ?? 0],
+      ['En progreso', objetivosConsolidados.value.en_progreso ?? 0],
+      ['Finalizados', objetivosConsolidados.value.finalizado ?? 0],
+      ['Avance de objetivos', `${objetivosConsolidados.value.avance ?? 0}%`],
+    ],
     row,
   )
 
@@ -184,6 +236,37 @@ async function exportarReporte() {
   if (barrasGlobal) {
     await addImageFromDataUrl(graficos, barrasGlobal, `A${chartRow}:I${chartRow + 18}`)
     chartRow += 20
+  }
+  if (objetivosConsolidados.value.total > 0) {
+    const donutObj = createDonutChartDataUrl('Avance de objetivos (todas las secretarias)', objetivosConsolidados.value.avance ?? 0)
+    if (donutObj) {
+      await addImageFromDataUrl(graficos, donutObj, `A${chartRow}:F${chartRow + 14}`)
+      chartRow += 16
+    }
+    const barrasObj = createHorizontalBarChartDataUrl(
+      'Objetivos por estado (todas las secretarias)',
+      [
+        { label: 'No iniciados', value: objetivosConsolidados.value.no_iniciado ?? 0, color: '#94a3b8' },
+        { label: 'En progreso', value: objetivosConsolidados.value.en_progreso ?? 0, color: '#f59e0b' },
+        { label: 'Finalizados', value: objetivosConsolidados.value.finalizado ?? 0, color: '#16a34a' },
+      ],
+      { unit: '', maxItems: 3 },
+    )
+    if (barrasObj) {
+      await addImageFromDataUrl(graficos, barrasObj, `A${chartRow}:I${chartRow + 12}`)
+      chartRow += 14
+    }
+    const barrasObjSec = createHorizontalBarChartDataUrl(
+      'Avance de objetivos por secretaria',
+      secretariasFiltradas.value
+        .filter((grupo) => objetivosDeGrupo(grupo).total)
+        .map((grupo) => ({ label: grupo.secretaria, value: objetivosDeGrupo(grupo).avance ?? 0 })),
+      { maxItems: 15 },
+    )
+    if (barrasObjSec) {
+      await addImageFromDataUrl(graficos, barrasObjSec, `A${chartRow}:I${chartRow + 18}`)
+      chartRow += 20
+    }
   }
   for (const grupo of secretariasFiltradas.value) {
     const donut = createDonutChartDataUrl(`Secretaria: ${grupo.secretaria}`, avancePromedioGrupo(grupo.tareas || []))
@@ -304,6 +387,9 @@ async function exportarReporte() {
             :max-barras="15"
           />
         </div>
+        <div v-if="objetivosConsolidados.total > 0" class="resumen-objetivos">
+          <ObjetivosResumenGrupo :objetivos="objetivosConsolidados" titulo="Objetivos asociados (todas las secretarías)" />
+        </div>
       </div>
 
       <div class="areas-container">
@@ -320,6 +406,11 @@ async function exportarReporte() {
         <div class="area-resumen">
           <span class="area-resumen-chip">Avance promedio: {{ avancePromedioGrupo(grupo.tareas || []).toFixed(1) }}%</span>
           <span class="area-resumen-chip">Con actualizacion: {{ (grupo.tareas || []).filter((t) => t.ultimo_incremento != null).length }}</span>
+          <span v-if="objetivosDeGrupo(grupo).total" class="area-resumen-chip area-resumen-chip-obj">Objetivos: {{ objetivosDeGrupo(grupo).total }} ({{ objetivosDeGrupo(grupo).avance }}%)</span>
+        </div>
+
+        <div v-if="objetivosDeGrupo(grupo).total" class="area-objetivos">
+          <ObjetivosResumenGrupo :objetivos="objetivosDeGrupo(grupo)" titulo="Objetivos de la secretaría" compacto />
         </div>
 
         <div class="tareas-grid">
@@ -685,6 +776,18 @@ async function exportarReporte() {
   color: #1d4ed8;
   font-size: 0.82rem;
   font-weight: 600;
+}
+.area-resumen-chip-obj {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+.area-objetivos {
+  padding: 0.75rem 1.25rem 0;
+}
+.resumen-objetivos {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e2e8f0;
 }
 .tareas-grid {
   display: grid;

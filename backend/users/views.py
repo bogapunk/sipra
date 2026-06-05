@@ -24,11 +24,8 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         require_roles(request.user, ROL_ADMIN, message='Solo el Administrador puede gestionar usuarios.')
 
     def get_queryset(self):
-        """Por defecto solo usuarios activos. Incluir inactivos con ?incluir_inactivos=1"""
-        qs = Usuario.objects.select_related('rol', 'area', 'secretaria').order_by('nombre', 'apellido')
-        if self.action == 'list' and self.request.query_params.get('incluir_inactivos') != '1':
-            qs = qs.filter(estado=True)
-        return qs
+        """Lista todos los usuarios (activos e inactivos) para la administración."""
+        return Usuario.objects.select_related('rol', 'area', 'secretaria').order_by('nombre', 'apellido')
 
     def destroy(self, request, *args, **kwargs):
         """Eliminación lógica: desactiva el usuario en lugar de borrarlo (evita ProtectedError)."""

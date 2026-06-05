@@ -53,6 +53,18 @@ type PresupuestoItemForm = {
   detalle: string
   orden: number
 }
+type EstadoAvanceObjetivo = 'No iniciado' | 'En progreso' | 'Finalizado'
+type ObjetivoProyectoForm = {
+  id: number
+  estado_avance: EstadoAvanceObjetivo
+}
+
+const ESTADOS_AVANCE_OBJETIVO: EstadoAvanceObjetivo[] = ['No iniciado', 'En progreso', 'Finalizado']
+const AVANCE_POR_ESTADO_OBJETIVO: Record<EstadoAvanceObjetivo, number> = {
+  'No iniciado': 0,
+  'En progreso': 50,
+  'Finalizado': 100,
+}
 
 const FUENTE_SIN_EROGACION: FuenteFinanciamiento = 'Sin Erogacion'
 const CATEGORIAS_GASTO: CategoriaGasto[] = ['Equipamiento', 'Gastos operativos y logisticos', 'Dotacion']
@@ -100,7 +112,11 @@ const form = ref({
   secretarias_ids: [] as number[],
   equipo: [] as number[],
   presupuesto_items: [] as PresupuestoItemForm[],
+  objetivos: [] as ObjetivoProyectoForm[],
 })
+const objetivosCatalogo = ref<Record<string, unknown>[]>([])
+const buscarObjetivo = ref('')
+const cargaObjetivosCatalogo = ref(false)
 const usuarios = ref<Record<string, unknown>[]>([])
 const usuariosParaResponsable = ref<Record<string, unknown>[]>([])
 const cargaUsuariosResponsable = ref(false)
@@ -250,6 +266,96 @@ const presupuestoCargado = computed(() =>
 const presupuestoDisponible = computed(() =>
   Math.max(0, montoToNumber(form.value.presupuesto_total) - presupuestoCargado.value),
 )
+
+const avanceObjetivosPreview = computed(() => {
+  const lista = form.value.objetivos
+  if (!lista.length) return 0
+  const sum = lista.reduce((acc, o) => acc + (AVANCE_POR_ESTADO_OBJETIVO[o.estado_avance] || 0), 0)
+  return Math.round(sum / lista.length)
+})
+
+const objetivosCatalogoFiltrados = computed(() => {
+  const q = buscarObjetivo.value.trim().toLowerCase()
+  if (!q) return objetivosCatalogo.value
+  return objetivosCatalogo.value.filter((o) => {
+    const desc = String(o.descripcion || '').toLowerCase()
+    const prog = String(o.programa_nombre || '').toLowerCase()
+    return desc.includes(q) || prog.includes(q)
+  })
+})
+
+function mapObjetivosAsignados(raw: unknown): ObjetivoProyectoForm[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry) => {
+      const item = entry as Record<string, unknown>
+      const id = Number(item.objetivo_id ?? item.id)
+      if (!Number.isFinite(id)) return null
+      const estado = String(item.estado_avance || 'No iniciado') as EstadoAvanceObjetivo
+      return {
+        id,
+        estado_avance: ESTADOS_AVANCE_OBJETIVO.includes(estado) ? estado : 'No iniciado',
+      }
+    })
+    .filter(Boolean) as ObjetivoProyectoForm[]
+}
+
+async function cargarObjetivosCatalogo() {
+  cargaObjetivosCatalogo.value = true
+  try {
+    objetivosCatalogo.value = await fetchAllPages('objetivos-estrategicos/')
+  } catch {
+    try {
+      const res = await api.get('objetivos-estrategicos/')
+      objetivosCatalogo.value = parseProyectos(res)
+    } catch {
+      objetivosCatalogo.value = []
+    }
+  } finally {
+    cargaObjetivosCatalogo.value = false
+  }
+}
+
+function isObjetivoSeleccionado(id: number): boolean {
+  return form.value.objetivos.some((o) => o.id === id)
+}
+
+function toggleObjetivo(id: number) {
+  const idx = form.value.objetivos.findIndex((o) => o.id === id)
+  if (idx >= 0) {
+    form.value.objetivos = form.value.objetivos.filter((o) => o.id !== id)
+    return
+  }
+  form.value.objetivos = [...form.value.objetivos, { id, estado_avance: 'No iniciado' }]
+}
+
+function setEstadoObjetivo(id: number, estado: EstadoAvanceObjetivo) {
+  form.value.objetivos = form.value.objetivos.map((o) =>
+    o.id === id ? { ...o, estado_avance: estado } : o,
+  )
+}
+
+function descripcionObjetivo(id: number): string {
+  const cat = objetivosCatalogo.value.find((o) => Number(o.id) === id)
+  if (cat) return String(cat.descripcion || `Objetivo ${id}`)
+  const sel = form.value.objetivos.find((o) => o.id === id)
+  if (sel) {
+    const fromApi = objetivosCatalogo.value.find((o) => Number(o.id) === sel.id)
+    return String(fromApi?.descripcion || `Objetivo ${id}`)
+  }
+  return `Objetivo ${id}`
+}
+
+function programaObjetivo(id: number): string {
+  const cat = objetivosCatalogo.value.find((o) => Number(o.id) === id)
+  return cat ? String(cat.programa_nombre || '') : ''
+}
+
+function claseEstadoAvanceObjetivo(estado: EstadoAvanceObjetivo): string {
+  if (estado === 'Finalizado') return 'obj-estado-finalizado'
+  if (estado === 'En progreso') return 'obj-estado-progreso'
+  return 'obj-estado-no-iniciado'
+}
 
 function buildProjectParams(page = paginaActual.value): Record<string, string | number> {
   const secretariaId = route.query.secretaria as string | undefined
@@ -417,6 +523,33 @@ const resumenProyectos = computed(() => {
   ]
 })
 
+const resumenObjetivos = computed(() => {
+  const lista = proyectosFiltrados.value
+  let total = 0
+  let noIniciado = 0
+  let enProgreso = 0
+  let finalizados = 0
+  for (const p of lista) {
+    const r = objetivosResumen(p)
+    total += r.total
+    noIniciado += r.no_iniciado
+    enProgreso += r.en_progreso
+    finalizados += r.finalizados
+  }
+  const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0)
+  const avance = total ? Math.round(((enProgreso * 50 + finalizados * 100) / total)) : 0
+  return {
+    total,
+    avance,
+    cards: [
+      { key: 'obj-total', title: 'Objetivos totales', value: total, pct: 100, meta: 'Asociados a los proyectos visibles', tone: 'neutral' },
+      { key: 'obj-noiniciado', title: 'No iniciados', value: noIniciado, pct: pct(noIniciado), meta: `${pct(noIniciado)}% del total`, tone: 'muted' },
+      { key: 'obj-progreso', title: 'En progreso', value: enProgreso, pct: pct(enProgreso), meta: `${pct(enProgreso)}% del total`, tone: 'warning' },
+      { key: 'obj-finalizado', title: 'Finalizados', value: finalizados, pct: pct(finalizados), meta: `${pct(finalizados)}% del total`, tone: 'success' },
+    ],
+  }
+})
+
 const totalPaginas = computed(() => Math.max(1, Math.ceil(totalProyectos.value / tamanioPagina)))
 const primerResultado = computed(() => totalProyectos.value ? ((paginaActual.value - 1) * tamanioPagina) + 1 : 0)
 const ultimoResultado = computed(() => Math.min(totalProyectos.value, paginaActual.value * tamanioPagina))
@@ -433,6 +566,21 @@ function estadoProyectoClase(estado: unknown): string {
   if (valor === 'finalizado') return 'estado-finalizado'
   if (valor === 'en pausa') return 'estado-pausa'
   return 'estado-neutro'
+}
+
+function objetivosResumen(p: Record<string, unknown>): {
+  total: number
+  no_iniciado: number
+  en_progreso: number
+  finalizados: number
+} {
+  const r = (p.objetivos_resumen as Record<string, number> | undefined) || {}
+  return {
+    total: Number(r.total) || 0,
+    no_iniciado: Number(r.no_iniciado) || 0,
+    en_progreso: Number(r.en_progreso) || 0,
+    finalizados: Number(r.finalizados) || 0,
+  }
 }
 
 function dependenciaOrganizacional(p: Record<string, unknown>): { tipo: string; nombre: string }[] {
@@ -540,8 +688,11 @@ const openCreate = async () => {
     secretarias_ids: tipoInicial === 'secretaria' && secretariaId ? [secretariaId] : [],
     equipo: [],
     presupuesto_items: [] as PresupuestoItemForm[],
+    objetivos: [] as ObjetivoProyectoForm[],
   }
+  buscarObjetivo.value = ''
   showForm.value = true
+  await cargarObjetivosCatalogo()
   loadUsuariosParaResponsable()
 }
 
@@ -619,13 +770,29 @@ const openEdit = async (p: Record<string, unknown>) => {
     secretarias_ids: tipo === 'secretaria' ? (secretariasIdsResolved.length ? secretariasIdsResolved : (secId ? [Number(secId)] : [])) : [],
     equipo: equipoIds,
     presupuesto_items: mapPresupuestoItems(proyecto.presupuesto_items),
+    objetivos: (() => {
+      const asignados = mapObjetivosAsignados(proyecto.objetivos_asignados)
+      if (asignados.length) return asignados
+      const legacyId = proyecto.objetivo_estrategico != null
+        ? (typeof proyecto.objetivo_estrategico === 'object'
+          ? (proyecto.objetivo_estrategico as { id?: number }).id
+          : proyecto.objetivo_estrategico)
+        : null
+      return legacyId ? [{ id: Number(legacyId), estado_avance: 'No iniciado' as EstadoAvanceObjetivo }] : []
+    })(),
   }
+  buscarObjetivo.value = ''
   showForm.value = true
+  await cargarObjetivosCatalogo()
   loadUsuariosParaResponsable()
 }
 
 const save = async () => {
-  const { tipoDependencia, areas_ids, secretarias_ids, equipo, usuario_responsable, presupuesto_items, ...rest } = form.value
+  const { tipoDependencia, areas_ids, secretarias_ids, equipo, usuario_responsable, presupuesto_items, objetivos, ...rest } = form.value
+  if (!objetivos.length) {
+    toast.error('Seleccione al menos un objetivo estratégico.')
+    return
+  }
   if (tipoDependencia === 'area' && !areas_ids.length) {
     toast.error('Seleccione al menos un área para el proyecto.')
     return
@@ -642,6 +809,7 @@ const save = async () => {
     usuario_responsable: usuario_responsable,
     equipo: equipo || [],
     presupuesto_items: presupuestoPayload,
+    objetivos: objetivos.map((o) => ({ id: o.id, estado_avance: o.estado_avance })),
   }
   if (tipoDependencia === 'area') {
     payload.areas_ids = areas_ids
@@ -873,6 +1041,40 @@ watch(buscarProyecto, () => {
       </article>
     </section>
 
+    <section v-if="resumenObjetivos.total > 0" class="objetivos-summary">
+      <div class="objetivos-summary-head">
+        <div class="objetivos-summary-title">
+          <span class="objetivos-summary-label">Objetivos asociados</span>
+          <span class="objetivos-summary-sub">Estado de los objetivos de los proyectos visibles</span>
+        </div>
+        <span class="objetivos-summary-avance">Avance global: {{ resumenObjetivos.avance }}%</span>
+      </div>
+      <div class="objetivos-summary-bar" :title="`No iniciados, en progreso y finalizados`">
+        <div
+          v-for="card in resumenObjetivos.cards.slice(1)"
+          :key="card.key"
+          class="objetivos-summary-seg"
+          :class="`seg-${card.tone}`"
+          :style="{ width: `${card.pct}%` }"
+        />
+      </div>
+      <div class="objetivos-summary-grid">
+        <article
+          v-for="card in resumenObjetivos.cards"
+          :key="card.key"
+          class="objetivos-summary-card"
+          :class="`obj-tone-${card.tone}`"
+        >
+          <span class="objetivos-summary-card-title">{{ card.title }}</span>
+          <div class="objetivos-summary-card-main">
+            <strong class="objetivos-summary-card-value">{{ card.value }}</strong>
+            <span v-if="card.key !== 'obj-total'" class="objetivos-summary-card-pct">{{ card.pct }}%</span>
+          </div>
+          <span class="objetivos-summary-card-meta">{{ card.meta }}</span>
+        </article>
+      </div>
+    </section>
+
     <div class="toolbar">
       <input
         v-model="buscarProyecto"
@@ -961,6 +1163,27 @@ watch(buscarProyecto, () => {
                   <div class="progress-fill" :style="{ width: `${Math.min(100, Number(p.porcentaje_avance) || 0)}%` }" />
                 </div>
                 <span class="progress-value">{{ Number(p.porcentaje_avance) ?? 0 }}%</span>
+              </div>
+              <div v-if="objetivosResumen(p).total > 0" class="avance-objetivos-inline">
+                <div class="avance-obj-head">
+                  <span class="avance-obj-label">Objetivos</span>
+                  <div class="progress-track progress-track-sm">
+                    <div class="progress-fill progress-fill-obj" :style="{ width: `${Math.min(100, Number(p.avance_objetivos) || 0)}%` }" />
+                  </div>
+                  <span class="progress-value-sm">{{ Number(p.avance_objetivos) ?? 0 }}%</span>
+                </div>
+                <div class="obj-chips">
+                  <span class="obj-chip obj-chip-noiniciado" :title="`${objetivosResumen(p).no_iniciado} no iniciado(s)`">
+                    <span class="obj-dot" /> {{ objetivosResumen(p).no_iniciado }}
+                  </span>
+                  <span class="obj-chip obj-chip-progreso" :title="`${objetivosResumen(p).en_progreso} en proceso`">
+                    <span class="obj-dot" /> {{ objetivosResumen(p).en_progreso }}
+                  </span>
+                  <span class="obj-chip obj-chip-finalizado" :title="`${objetivosResumen(p).finalizados} finalizado(s)`">
+                    <span class="obj-dot" /> {{ objetivosResumen(p).finalizados }}
+                  </span>
+                  <span class="obj-chip-total" :title="`${objetivosResumen(p).total} objetivos en total`">/ {{ objetivosResumen(p).total }}</span>
+                </div>
               </div>
             </td>
             <td>{{ p.responsable_nombre || p.creado_por || '-' }}</td>
@@ -1107,6 +1330,70 @@ watch(buscarProyecto, () => {
             <option value="En pausa">En pausa</option>
             <option value="Finalizado">Finalizado</option>
           </select>
+
+          <section class="form-section objetivos-section">
+            <div class="form-section-header">
+              <div>
+                <h3>Objetivos</h3>
+                <p class="hint">Seleccione uno o más objetivos de Planificación. Cada uno puede tener un estado de avance independiente.</p>
+              </div>
+              <span class="objetivos-resumen-chip">
+                {{ form.objetivos.length }} seleccionado(s) · Avance: {{ avanceObjetivosPreview }}%
+              </span>
+            </div>
+            <input
+              v-model="buscarObjetivo"
+              type="search"
+              class="search-input objetivos-search"
+              placeholder="Buscar objetivo por descripción o programa..."
+            />
+            <LoaderSpinner v-if="cargaObjetivosCatalogo" texto="Cargando objetivos de Planificación..." />
+            <p v-else-if="!objetivosCatalogo.length" class="hint">No hay objetivos cargados en Planificación.</p>
+            <div v-else class="objetivos-catalogo">
+              <label
+                v-for="o in objetivosCatalogoFiltrados"
+                :key="(o.id as number)"
+                class="objetivo-check"
+                :class="{ checked: isObjetivoSeleccionado(o.id as number) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="isObjetivoSeleccionado(o.id as number)"
+                  @change="toggleObjetivo(o.id as number)"
+                />
+                <span class="objetivo-check-body">
+                  <span class="objetivo-programa">{{ o.programa_nombre || 'Programa' }}</span>
+                  <span class="objetivo-desc">{{ o.descripcion }}</span>
+                </span>
+              </label>
+            </div>
+            <div v-if="form.objetivos.length" class="objetivos-seleccionados">
+              <h4>Objetivos asociados al proyecto</h4>
+              <article
+                v-for="sel in form.objetivos"
+                :key="sel.id"
+                class="objetivo-seleccionado-card"
+              >
+                <div class="objetivo-seleccionado-info">
+                  <span v-if="programaObjetivo(sel.id)" class="objetivo-programa">{{ programaObjetivo(sel.id) }}</span>
+                  <p class="objetivo-desc">{{ descripcionObjetivo(sel.id) }}</p>
+                </div>
+                <div class="objetivo-estado-wrap">
+                  <label>Estado de avance</label>
+                  <select
+                    :value="sel.estado_avance"
+                    class="objetivo-estado-select"
+                    :class="claseEstadoAvanceObjetivo(sel.estado_avance)"
+                    @change="setEstadoObjetivo(sel.id, ($event.target as HTMLSelectElement).value as EstadoAvanceObjetivo)"
+                  >
+                    <option v-for="est in ESTADOS_AVANCE_OBJETIVO" :key="est" :value="est">{{ est }}</option>
+                  </select>
+                </div>
+                <button type="button" class="btn-link-danger" @click="toggleObjetivo(sel.id)">Quitar</button>
+              </article>
+            </div>
+            <p v-else class="hint objetivos-requerido">Debe seleccionar al menos un objetivo.</p>
+          </section>
 
           <section class="form-section">
             <div class="form-section-header">
@@ -1404,6 +1691,72 @@ watch(buscarProyecto, () => {
 .tone-info { border-top: 4px solid #0ea5e9; }
 .tone-success { border-top: 4px solid #16a34a; }
 .tone-warning { border-top: 4px solid #f59e0b; }
+.objetivos-summary {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1.1rem 1.25rem 1.25rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.objetivos-summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.objetivos-summary-title { display: flex; flex-direction: column; gap: 0.15rem; }
+.objetivos-summary-label { font-size: 1rem; font-weight: 700; color: #0f172a; }
+.objetivos-summary-sub { font-size: 0.85rem; color: #64748b; }
+.objetivos-summary-avance {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #6d28d9;
+  font-weight: 700;
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+.objetivos-summary-bar {
+  display: flex;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+.objetivos-summary-seg { height: 100%; transition: width 0.4s ease; }
+.objetivos-summary-seg.seg-muted { background: #94a3b8; }
+.objetivos-summary-seg.seg-warning { background: #f59e0b; }
+.objetivos-summary-seg.seg-success { background: #16a34a; }
+.objetivos-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+.objetivos-summary-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+}
+.objetivos-summary-card-title { font-size: 0.85rem; color: #475569; font-weight: 600; }
+.objetivos-summary-card-main { display: flex; align-items: baseline; gap: 0.5rem; }
+.objetivos-summary-card-value { font-size: 1.7rem; line-height: 1; color: #0f172a; }
+.objetivos-summary-card-pct { font-size: 0.95rem; font-weight: 700; color: #64748b; }
+.objetivos-summary-card-meta { font-size: 0.8rem; color: #64748b; }
+.objetivos-summary-card.obj-tone-neutral { border-top: 4px solid #6366f1; }
+.objetivos-summary-card.obj-tone-muted { border-top: 4px solid #94a3b8; }
+.objetivos-summary-card.obj-tone-warning { border-top: 4px solid #f59e0b; }
+.objetivos-summary-card.obj-tone-success { border-top: 4px solid #16a34a; }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1591,6 +1944,101 @@ watch(buscarProyecto, () => {
   font-size: 0.85rem;
   color: #64748b;
 }
+.objetivos-section .objetivos-resumen-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.objetivos-search { margin-bottom: 0.75rem; }
+.objetivos-catalogo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+  padding-right: 0.25rem;
+}
+.objetivo-check {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #fafbfc;
+  transition: border-color 0.2s, background 0.2s;
+}
+.objetivo-check:hover { border-color: #93c5fd; background: #f8fafc; }
+.objetivo-check.checked { border-color: #3b82f6; background: #eff6ff; }
+.objetivo-check input { margin-top: 0.2rem; accent-color: #3b82f6; }
+.objetivo-check-body { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.objetivo-programa { font-size: 0.75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.02em; }
+.objetivo-desc { font-size: 0.9rem; color: #1e293b; line-height: 1.35; }
+.objetivos-seleccionados h4 { margin: 0 0 0.65rem; font-size: 0.95rem; color: #334155; }
+.objetivo-seleccionado-card {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+  margin-bottom: 0.5rem;
+}
+.objetivo-seleccionado-info { min-width: 0; }
+.objetivo-estado-wrap { display: flex; flex-direction: column; gap: 0.25rem; min-width: 160px; }
+.objetivo-estado-wrap label { font-size: 0.75rem; color: #64748b; font-weight: 600; }
+.objetivo-estado-select {
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-size: 0.85rem;
+}
+.obj-estado-no-iniciado { background: #f8fafc; color: #64748b; }
+.obj-estado-progreso { background: #fef9c3; color: #a16207; border-color: #fde047; }
+.obj-estado-finalizado { background: #dcfce7; color: #15803d; border-color: #86efac; }
+.objetivos-requerido { color: #b45309; }
+.avance-objetivos-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed #e2e8f0;
+}
+.avance-obj-head { display: flex; align-items: center; gap: 0.35rem; }
+.avance-obj-label { font-size: 0.7rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.progress-track-sm { height: 6px; flex: 1; min-width: 40px; }
+.progress-fill-obj { background: #8b5cf6; }
+.progress-value-sm { font-size: 0.75rem; color: #6d28d9; font-weight: 600; min-width: 2.2rem; }
+.obj-chips { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.obj-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  line-height: 1.2;
+}
+.obj-chip .obj-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.obj-chip-noiniciado { background: #f1f5f9; color: #475569; }
+.obj-chip-noiniciado .obj-dot { background: #94a3b8; }
+.obj-chip-progreso { background: #fef9c3; color: #a16207; }
+.obj-chip-progreso .obj-dot { background: #f59e0b; }
+.obj-chip-finalizado { background: #dcfce7; color: #15803d; }
+.obj-chip-finalizado .obj-dot { background: #16a34a; }
+.obj-chip-total { font-size: 0.72rem; color: #94a3b8; font-weight: 600; }
 .tipo-dependencia-selector {
   display: flex;
   gap: 1rem;
@@ -2061,9 +2509,11 @@ a:hover { text-decoration: underline; }
 .leyenda-item.dentro::before { background: #22c55e; }
 @media (max-width: 1100px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .objetivos-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
   .summary-grid { grid-template-columns: 1fr; }
+  .objetivos-summary-grid { grid-template-columns: 1fr; }
   .page-hero { padding: 1rem; }
 }
 </style>

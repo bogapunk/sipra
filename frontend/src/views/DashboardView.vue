@@ -13,6 +13,7 @@ import {
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import LoaderSpinner from '@/components/LoaderSpinner.vue'
+import ObjetivosDashboard from '@/components/dashboard/ObjetivosDashboard.vue'
 import { api } from '@/services/api'
 import { getDashboard, getDashboardAnalitico, getDashboardUsuario } from '@/services/dashboard'
 import { useAuth } from '@/composables/useAuth'
@@ -37,6 +38,11 @@ type Kpis = {
   proyectos_en_riesgo: number
   tareas_bloqueadas: number
   tareas_activas: number
+  objetivos_total?: number
+  objetivos_no_iniciados?: number
+  objetivos_en_progreso?: number
+  objetivos_finalizados?: number
+  avance_objetivos?: number
 }
 
 type ChartItem = {
@@ -58,6 +64,16 @@ type TrendPoint = {
   label: string
   valor: number
   actualizaciones: number
+}
+
+type ObjetivoPorProyecto = {
+  id: number
+  nombre: string
+  total: number
+  no_iniciado: number
+  en_progreso: number
+  finalizado: number
+  avance: number
 }
 
 type VencimientoPoint = {
@@ -94,6 +110,8 @@ type DashboardAnalitico = {
   kpis: Kpis
   charts: {
     proyectos_por_estado: ChartItem[]
+    objetivos_por_estado: ChartItem[]
+    objetivos_por_proyecto: ObjetivoPorProyecto[]
     proyectos_por_dependencia: ChartItem[]
     tendencia_avance: TrendPoint[]
     vencimientos: VencimientoPoint[]
@@ -262,6 +280,8 @@ async function cargarDashboardEjecutivo() {
       },
       charts: {
         proyectos_por_estado: [],
+        objetivos_por_estado: [],
+        objetivos_por_proyecto: [],
         proyectos_por_dependencia: [],
         tendencia_avance: [],
         vencimientos: [],
@@ -689,6 +709,8 @@ async function exportarResumen() {
     addReportHeader,
     addTable,
     createWorkbook,
+    createDonutChartDataUrl,
+    createHorizontalBarChartDataUrl,
     saveWorkbook,
   } = await import('@/utils/exportWorkbook')
   const workbook = await createWorkbook('Panel de control')
@@ -714,6 +736,8 @@ async function exportarResumen() {
       ['Avance promedio', `${dashboard.value.kpis.avance_promedio}%`, `${dashboard.value.kpis.tareas_activas} tareas activas`],
       ['Proyectos en riesgo', dashboard.value.kpis.proyectos_en_riesgo, 'Seguimiento prioritario'],
       ['Tareas bloqueadas', dashboard.value.kpis.tareas_bloqueadas, 'Impacto operativo'],
+      ['Objetivos totales', dashboard.value.kpis.objetivos_total ?? 0, `${dashboard.value.kpis.objetivos_no_iniciados ?? 0} no iniciados / ${dashboard.value.kpis.objetivos_en_progreso ?? 0} en progreso / ${dashboard.value.kpis.objetivos_finalizados ?? 0} finalizados`],
+      ['Avance de objetivos', `${dashboard.value.kpis.avance_objetivos ?? 0}%`, 'Promedio ponderado por estado'],
     ],
     row,
   )
@@ -745,6 +769,74 @@ async function exportarResumen() {
     await addImageFromDataUrl(graficos, dataUrl, `A${chartRow + 1}:H${chartRow + 17}`)
     chartRow += 19
   }
+
+  const kpisObj = dashboard.value.kpis
+  const totalObjetivos = Number(kpisObj.objetivos_total ?? 0)
+  if (totalObjetivos > 0) {
+    const donutObjetivos = createDonutChartDataUrl('Avance general de objetivos', Number(kpisObj.avance_objetivos ?? 0))
+    if (donutObjetivos) {
+      graficos.getCell(`A${chartRow}`).value = 'Avance general de objetivos'
+      graficos.getCell(`A${chartRow}`).font = { bold: true, size: 12 }
+      await addImageFromDataUrl(graficos, donutObjetivos, `A${chartRow + 1}:H${chartRow + 17}`)
+      chartRow += 19
+    }
+    const barrasObjetivos = createHorizontalBarChartDataUrl(
+      'Objetivos por estado',
+      [
+        { label: 'No iniciados', value: Number(kpisObj.objetivos_no_iniciados ?? 0), color: '#94a3b8' },
+        { label: 'En progreso', value: Number(kpisObj.objetivos_en_progreso ?? 0), color: '#f59e0b' },
+        { label: 'Finalizados', value: Number(kpisObj.objetivos_finalizados ?? 0), color: '#16a34a' },
+      ],
+      { unit: '', maxItems: 3 },
+    )
+    if (barrasObjetivos) {
+      graficos.getCell(`A${chartRow}`).value = 'Objetivos por estado'
+      graficos.getCell(`A${chartRow}`).font = { bold: true, size: 12 }
+      await addImageFromDataUrl(graficos, barrasObjetivos, `A${chartRow + 1}:H${chartRow + 13}`)
+      chartRow += 15
+    }
+    const porProyecto = dashboard.value.charts.objetivos_por_proyecto || []
+    if (porProyecto.length) {
+      const barrasPorProyecto = createHorizontalBarChartDataUrl(
+        'Avance de objetivos por proyecto',
+        porProyecto.map((p) => ({ label: p.nombre, value: p.avance })),
+        { unit: '%', maxItems: 15 },
+      )
+      if (barrasPorProyecto) {
+        graficos.getCell(`A${chartRow}`).value = 'Avance de objetivos por proyecto'
+        graficos.getCell(`A${chartRow}`).font = { bold: true, size: 12 }
+        await addImageFromDataUrl(graficos, barrasPorProyecto, `A${chartRow + 1}:H${chartRow + 19}`)
+      }
+    }
+  }
+
+  const objetivosSheet = workbook.addWorksheet('Objetivos')
+  let objetivosRow = addReportHeader(objetivosSheet, 'Objetivos del portafolio', 'Resumen y avance por proyecto.')
+  objetivosRow = addTable(
+    objetivosSheet,
+    ['Indicador', 'Valor'],
+    [
+      ['Objetivos totales', totalObjetivos],
+      ['No iniciados', Number(kpisObj.objetivos_no_iniciados ?? 0)],
+      ['En progreso', Number(kpisObj.objetivos_en_progreso ?? 0)],
+      ['Finalizados', Number(kpisObj.objetivos_finalizados ?? 0)],
+      ['Avance de objetivos', `${kpisObj.avance_objetivos ?? 0}%`],
+    ],
+    objetivosRow,
+  )
+  addTable(
+    objetivosSheet,
+    ['Proyecto', 'Total', 'No iniciados', 'En progreso', 'Finalizados', 'Avance %'],
+    (dashboard.value.charts.objetivos_por_proyecto || []).map((p) => [
+      p.nombre,
+      p.total,
+      p.no_iniciado,
+      p.en_progreso,
+      p.finalizado,
+      `${p.avance}%`,
+    ]),
+    objetivosRow,
+  )
 
   const proyectos = workbook.addWorksheet('Proyectos en riesgo')
   let proyectosRow = addReportHeader(proyectos, 'Proyectos en riesgo')
@@ -881,6 +973,13 @@ const resumenCarga = computed(() => {
           <span class="insight-meta">{{ item.meta }}</span>
         </article>
       </section>
+
+      <ObjetivosDashboard
+        :kpis="dashboard.kpis"
+        :por-estado="dashboard.charts.objetivos_por_estado"
+        :por-proyecto="dashboard.charts.objetivos_por_proyecto"
+        @select-proyecto="(id) => router.push(`/proyectos/${id}`)"
+      />
 
       <section class="chart-grid two-columns">
         <article class="chart-card">

@@ -6,12 +6,13 @@ _proyecto_presupuesto_identity_cache = None
 
 
 class Eje(models.Model):
-    """Eje estratégico de la planificación 2026."""
+    """Eje estratégico de un período de planificación anual."""
     id_eje = models.IntegerField(primary_key=True)
+    anio = models.PositiveSmallIntegerField(default=2026, db_index=True)
     nombre_eje = models.CharField(max_length=300)
 
     class Meta:
-        ordering = ['id_eje']
+        ordering = ['anio', 'id_eje']
         verbose_name = 'Eje'
         verbose_name_plural = 'Ejes'
 
@@ -63,6 +64,50 @@ class ObjetivoEstrategico(models.Model):
 
     def __str__(self):
         return self.descripcion[:80] + ('...' if len(self.descripcion) > 80 else '')
+
+
+class ProyectoObjetivo(models.Model):
+    """Vínculo proyecto–objetivo estratégico con estado de avance."""
+    ESTADO_NO_INICIADO = 'No iniciado'
+    ESTADO_EN_PROGRESO = 'En progreso'
+    ESTADO_FINALIZADO = 'Finalizado'
+    ESTADOS_AVANCE = [
+        (ESTADO_NO_INICIADO, ESTADO_NO_INICIADO),
+        (ESTADO_EN_PROGRESO, ESTADO_EN_PROGRESO),
+        (ESTADO_FINALIZADO, ESTADO_FINALIZADO),
+    ]
+    AVANCE_POR_ESTADO = {
+        ESTADO_NO_INICIADO: 0,
+        ESTADO_EN_PROGRESO: 50,
+        ESTADO_FINALIZADO: 100,
+    }
+
+    proyecto = models.ForeignKey(
+        'Proyecto', on_delete=models.CASCADE, related_name='objetivos_proyecto', db_constraint=False
+    )
+    objetivo = models.ForeignKey(
+        ObjetivoEstrategico, on_delete=models.CASCADE, related_name='vinculos_proyecto', db_constraint=False
+    )
+    estado_avance = models.CharField(
+        max_length=20, choices=ESTADOS_AVANCE, default=ESTADO_NO_INICIADO
+    )
+
+    class Meta:
+        unique_together = ('proyecto', 'objetivo')
+        ordering = ['id']
+        verbose_name = 'Objetivo del proyecto'
+        verbose_name_plural = 'Objetivos del proyecto'
+
+    def __str__(self):
+        return f'{self.proyecto_id} → {self.objetivo_id} ({self.estado_avance})'
+
+    @classmethod
+    def calcular_avance_promedio(cls, queryset):
+        items = list(queryset)
+        if not items:
+            return 0
+        total = sum(cls.AVANCE_POR_ESTADO.get(item.estado_avance, 0) for item in items)
+        return round(total / len(items), 2)
 
 
 class Proyecto(models.Model):

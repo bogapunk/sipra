@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { api } from '@/services/api'
+import { api, invalidateApiCache } from '@/services/api'
 import { useRouter, useRoute } from 'vue-router'
 import IconDownload from '@/components/icons/IconDownload.vue'
 import IconPlus from '@/components/icons/IconPlus.vue'
@@ -17,6 +17,103 @@ const route = useRoute()
 const { isAdmin } = useAuth()
 const { confirmDelete } = useConfirmDelete()
 const toast = useToast()
+
+/** Planificación original del sistema; se mantiene sin importación masiva. */
+const ANIO_PLANIFICACION_BASE = 2026
+
+const anioSeleccionado = ref(ANIO_PLANIFICACION_BASE)
+const periodosDisponibles = ref<number[]>([ANIO_PLANIFICACION_BASE])
+const importando = ref(false)
+const archivoImport = ref<HTMLInputElement | null>(null)
+
+const esPlanificacionBase = computed(() => anioSeleccionado.value === ANIO_PLANIFICACION_BASE)
+
+const tituloPlanificacion = computed(() =>
+  esPlanificacionBase.value ? 'Planificación' : `Planificación ${anioSeleccionado.value}`,
+)
+
+const aniosOpciones = computed(() => {
+  const base = new Set(periodosDisponibles.value)
+  base.add(ANIO_PLANIFICACION_BASE)
+  base.add(anioSeleccionado.value)
+  const actual = new Date().getFullYear()
+  for (let y = actual; y <= actual + 5; y += 1) base.add(y)
+  return [...base].sort((a, b) => {
+    if (a === ANIO_PLANIFICACION_BASE) return -1
+    if (b === ANIO_PLANIFICACION_BASE) return 1
+    return b - a
+  })
+})
+
+function paramsAnio() {
+  return { params: { anio: anioSeleccionado.value } }
+}
+
+async function loadPeriodos() {
+  try {
+    const res = await api.get('planificacion/periodos/')
+    const data = res.data as { periodos?: number[]; planificacion_base?: number }
+    const base = data.planificacion_base ?? ANIO_PLANIFICACION_BASE
+    const lista = Array.isArray(data.periodos) ? data.periodos : []
+    periodosDisponibles.value = [...new Set([base, ...lista])].sort((a, b) => b - a)
+  } catch {
+    periodosDisponibles.value = [ANIO_PLANIFICACION_BASE]
+  }
+}
+
+function nextEjeId(): number {
+  const list = ejes.value
+  if (!list.length) {
+    return anioSeleccionado.value === ANIO_PLANIFICACION_BASE ? 1 : anioSeleccionado.value * 100 + 1
+  }
+  return Math.max(...list.map((e) => Number(e.id_eje) || 0)) + 1
+}
+
+async function descargarPlantillaImportacion() {
+  try {
+    const res = await api.get('planificacion/plantilla-importacion/', { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'plantilla_planificacion.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    toast.error('No se pudo descargar la plantilla.')
+  }
+}
+
+async function importarPlanificacion(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  importando.value = true
+  try {
+    const formData = new FormData()
+    formData.append('archivo', file)
+    formData.append('anio', String(anioSeleccionado.value))
+    const res = await api.post('planificacion/importar/', formData)
+    const stats = (res.data as { estadisticas?: Record<string, number> }).estadisticas || {}
+    toast.success(
+      `Importación ${anioSeleccionado.value} completada: `
+      + `${stats.ejes || 0} ejes, ${stats.planes || 0} planes, ${stats.programas || 0} programas, `
+      + `${stats.objetivos || 0} objetivos, ${stats.proyectos || 0} proyectos, ${stats.indicadores || 0} indicadores.`,
+    )
+    invalidateApiCache('ejes')
+    invalidateApiCache('planes')
+    invalidateApiCache('programas')
+    invalidateApiCache('objetivos')
+    invalidateApiCache('planificacion')
+    await loadPeriodos()
+    loadAll()
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { detail?: string } } }
+    toast.error(err.response?.data?.detail || 'Error al importar la planificación.')
+  } finally {
+    importando.value = false
+    input.value = ''
+  }
+}
 
 const tabs = [
   { id: 'estructura', label: 'Estructura', icon: '📊' },
@@ -72,17 +169,38 @@ function expandirTodos() {
 function colapsarTodos() { expandidos.value = new Set() }
 function irAProyecto(id: number) { router.push(`/proyectos/${id}`) }
 
+function formatearAvanceProyecto(val: unknown): string {
+  const n = Number(val)
+  if (!Number.isFinite(n)) return '0'
+  const redondeado = Math.round(n * 10) / 10
+  return Number.isInteger(redondeado) ? String(redondeado) : redondeado.toFixed(1)
+}
+
+function avanceTareasProyecto(proy: Record<string, unknown>): number {
+  return Number(proy.avance_tareas ?? proy.porcentaje_avance) || 0
+}
+
+function avanceObjetivosProyecto(proy: Record<string, unknown>): number | null {
+  const raw = proy.avance_objetivos
+  if (raw == null || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
 // ABM desde estructura (con padre pre-seleccionado)
 function openCreateEjeDesdeEstructura() {
-  const maxId = arbol.value.length ? Math.max(...arbol.value.map((e: Record<string, unknown>) => (e.id as number) || 0)) : 0
   editingEjeId.value = null
-  formEje.value = { id_eje: maxId + 1, nombre_eje: '' }
+  formEje.value = { id_eje: nextEjeId(), nombre_eje: '', anio: anioSeleccionado.value }
   showFormEje.value = true
 }
 
 function openEditEjeDesdeEstructura(eje: Record<string, unknown>) {
   editingEjeId.value = eje.id as number
-  formEje.value = { id_eje: eje.id as number, nombre_eje: (eje.nombre as string) || '' }
+  formEje.value = {
+    id_eje: eje.id as number,
+    nombre_eje: (eje.nombre as string) || '',
+    anio: Number(eje.anio) || anioSeleccionado.value,
+  }
   showFormEje.value = true
 }
 
@@ -129,7 +247,7 @@ async function openEditObjDesdeEstructura(obj: Record<string, unknown>) {
 const loadArbol = async () => {
   cargaArbol.value = true
   try {
-    arbol.value = (await api.get('planificacion/arbol/')).data
+    arbol.value = (await api.get('planificacion/arbol/', paramsAnio())).data
     expandirTodos()
   } catch { arbol.value = [] }
   finally { cargaArbol.value = false }
@@ -140,7 +258,7 @@ const ejes = ref<Record<string, unknown>[]>([])
 const buscarEje = ref('')
 const showFormEje = ref(false)
 const editingEjeId = ref<number | null>(null)
-const formEje = ref({ id_eje: 0, nombre_eje: '' })
+const formEje = ref({ id_eje: 0, nombre_eje: '', anio: ANIO_PLANIFICACION_BASE })
 
 const ejesFiltrados = computed(() => {
   const q = buscarEje.value.trim().toLowerCase()
@@ -150,7 +268,7 @@ const ejesFiltrados = computed(() => {
 })
 
 const loadEjes = async () => {
-  ejes.value = (await api.get('ejes/')).data
+  ejes.value = (await api.get('ejes/', paramsAnio())).data
 }
 
 // Planes ABM
@@ -173,7 +291,10 @@ const planesFiltrados = computed(() => {
 })
 
 const loadPlanes = async () => {
-  const [pRes, eRes] = await Promise.all([api.get('planes/'), api.get('ejes/')])
+  const [pRes, eRes] = await Promise.all([
+    api.get('planes/', paramsAnio()),
+    api.get('ejes/', paramsAnio()),
+  ])
   planes.value = Array.isArray(pRes.data) ? pRes.data : (pRes.data?.results || [])
   ejes.value = Array.isArray(eRes.data) ? eRes.data : (eRes.data?.results || [])
 }
@@ -195,7 +316,10 @@ const programasFiltrados = computed(() => {
 })
 
 const loadProgramas = async () => {
-  const [prRes, plRes] = await Promise.all([api.get('programas/'), api.get('planes/')])
+  const [prRes, plRes] = await Promise.all([
+    api.get('programas/', paramsAnio()),
+    api.get('planes/', paramsAnio()),
+  ])
   programas.value = Array.isArray(prRes.data) ? prRes.data : (prRes.data?.results || [])
   planes.value = Array.isArray(plRes.data) ? plRes.data : (plRes.data?.results || [])
 }
@@ -217,7 +341,10 @@ const objetivosFiltrados = computed(() => {
 })
 
 const loadObjetivos = async () => {
-  const [oRes, pRes] = await Promise.all([api.get('objetivos-estrategicos/'), api.get('programas/')])
+  const [oRes, pRes] = await Promise.all([
+    api.get('objetivos-estrategicos/', paramsAnio()),
+    api.get('programas/', paramsAnio()),
+  ])
   objetivos.value = Array.isArray(oRes.data) ? oRes.data : (oRes.data?.results || [])
   programas.value = Array.isArray(pRes.data) ? pRes.data : (pRes.data?.results || [])
 }
@@ -272,7 +399,12 @@ watch(tabActual, (t) => {
   else if (t === 'indicadores') loadIndicadores()
 })
 
-onMounted(() => {
+watch(anioSeleccionado, () => {
+  loadAll()
+})
+
+onMounted(async () => {
+  await loadPeriodos()
   loadArbol()
   if (tabActual.value === 'ejes') loadEjes()
   else if (tabActual.value === 'planes') loadPlanes()
@@ -284,24 +416,28 @@ onMounted(() => {
 // Ejes
 function openCreateEje() {
   editingEjeId.value = null
-  const maxId = ejes.value.length ? Math.max(...ejes.value.map((e: Record<string, unknown>) => (e.id_eje as number) || 0)) : 0
-  formEje.value = { id_eje: maxId + 1, nombre_eje: '' }
+  formEje.value = { id_eje: nextEjeId(), nombre_eje: '', anio: anioSeleccionado.value }
   showFormEje.value = true
 }
 
 function openEditEje(e: Record<string, unknown>) {
   editingEjeId.value = e.id_eje as number
-  formEje.value = { id_eje: e.id_eje as number, nombre_eje: (e.nombre_eje as string) || '' }
+  formEje.value = {
+    id_eje: e.id_eje as number,
+    nombre_eje: (e.nombre_eje as string) || '',
+    anio: Number(e.anio) || anioSeleccionado.value,
+  }
   showFormEje.value = true
 }
 
 async function saveEje() {
   try {
+    const payload = { ...formEje.value, anio: anioSeleccionado.value }
     if (editingEjeId.value !== null) {
-      await api.patch(`ejes/${editingEjeId.value}/`, formEje.value)
+      await api.patch(`ejes/${editingEjeId.value}/`, payload)
       toast.success('Eje actualizado.')
     } else {
-      await api.post('ejes/', formEje.value)
+      await api.post('ejes/', payload)
       toast.success('Eje creado.')
     }
     showFormEje.value = false
@@ -554,8 +690,21 @@ async function exportIndicadores() {
 <template>
   <div class="page planificacion-panel">
     <header class="page-header">
-      <h1>Planificación</h1>
-      <p class="subtitle">Estructura: Eje → Plan → Programa → Objetivo → Proyecto → Indicador</p>
+      <div class="header-top">
+        <div>
+          <h1>{{ tituloPlanificacion }}</h1>
+          <p class="subtitle">
+            Estructura: Eje → Plan → Programa → Objetivo → Proyecto → Indicador
+            <span v-if="esPlanificacionBase" class="subtitle-base"> · Período {{ ANIO_PLANIFICACION_BASE }} (planificación vigente)</span>
+          </p>
+        </div>
+        <div class="anio-selector">
+          <label for="anio-planificacion">Año</label>
+          <select id="anio-planificacion" v-model.number="anioSeleccionado" class="select-anio">
+            <option v-for="y in aniosOpciones" :key="y" :value="y">{{ y }}</option>
+          </select>
+        </div>
+      </div>
       <div class="tabs">
         <button
           v-for="t in tabs"
@@ -573,6 +722,30 @@ async function exportIndicadores() {
 
     <!-- Estructura -->
     <div v-show="tabActual === 'estructura'" class="tab-content">
+      <div v-if="isAdmin && !esPlanificacionBase" class="import-panel">
+        <h3 class="import-title">Carga masiva de planificación {{ anioSeleccionado }}</h3>
+        <p class="import-hint">
+          Suba un archivo Excel (.xlsx) o CSV con la jerarquía completa para el año
+          <strong>{{ anioSeleccionado }}</strong>.
+          La planificación {{ ANIO_PLANIFICACION_BASE }} se gestiona desde este panel sin importación masiva.
+          <button type="button" class="link-btn" @click="descargarPlantillaImportacion">Descargar plantilla</button>
+        </p>
+        <div class="import-actions">
+          <input
+            ref="archivoImport"
+            type="file"
+            accept=".csv,.xlsx,.xlsm"
+            class="file-input"
+            :disabled="importando"
+            @change="importarPlanificacion"
+          />
+          <span v-if="importando" class="import-status">Importando planificación {{ anioSeleccionado }}...</span>
+        </div>
+      </div>
+      <p v-else-if="isAdmin && esPlanificacionBase" class="planificacion-base-hint">
+        La planificación {{ ANIO_PLANIFICACION_BASE }} es la cargada originalmente en el sistema.
+        Para importar otro período anual, seleccione un año distinto en el selector superior.
+      </p>
       <div class="toolbar">
         <button type="button" class="btn-outline" @click="expandirTodos">Expandir todo</button>
         <button type="button" class="btn-outline" @click="colapsarTodos">Colapsar todo</button>
@@ -638,8 +811,22 @@ async function exportIndicadores() {
                         <div v-for="proy in (obj.proyectos || [])" :key="'proy-' + proy.id" class="nivel">
                           <div class="nodo proyecto clickable" @click="irAProyecto(proy.id)">
                             <span class="icono">●</span>
-                            <span class="valor">{{ proy.nombre }}</span>
-                            <span class="badge">{{ proy.porcentaje_avance }}%</span>
+                            <span class="valor proyecto-nombre">{{ proy.nombre }}</span>
+                            <div class="proyecto-avance-badges">
+                              <span
+                                class="badge"
+                                :title="`Avance tareas: ${formatearAvanceProyecto(avanceTareasProyecto(proy))}%`"
+                              >
+                                {{ formatearAvanceProyecto(avanceTareasProyecto(proy)) }}%
+                              </span>
+                              <span
+                                v-if="avanceObjetivosProyecto(proy) != null"
+                                class="badge badge-objetivos"
+                                :title="`Avance objetivos: ${formatearAvanceProyecto(avanceObjetivosProyecto(proy))}%`"
+                              >
+                                Obj. {{ formatearAvanceProyecto(avanceObjetivosProyecto(proy)) }}%
+                              </span>
+                            </div>
                             <span class="estado">{{ proy.estado }}</span>
                           </div>
                           <div v-if="(proy.indicadores || []).length" class="hijos indicadores">
@@ -992,7 +1179,35 @@ async function exportIndicadores() {
 <style scoped>
 .planificacion-panel { max-width: 1000px; }
 .page-header { margin-bottom: 1rem; }
+.header-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
 .page-header h1 { margin-bottom: 0.5rem; }
+.anio-selector { display: flex; flex-direction: column; gap: 0.35rem; min-width: 120px; }
+.anio-selector label { font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; }
+.select-anio { padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; font-weight: 600; background: #fff; }
+.import-panel {
+  background: linear-gradient(135deg, #f0f9ff 0%, #eff6ff 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+}
+.import-title { margin: 0 0 0.35rem; font-size: 1rem; color: #1e3a8a; }
+.import-hint { margin: 0 0 0.75rem; color: #475569; font-size: 0.9rem; line-height: 1.45; }
+.link-btn { background: none; border: none; color: #2563eb; cursor: pointer; text-decoration: underline; padding: 0; font-size: inherit; }
+.import-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.file-input { font-size: 0.9rem; }
+.import-status { color: #64748b; font-size: 0.9rem; }
+.subtitle-base { color: #475569; }
+.planificacion-base-hint {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
 .subtitle { color: #64748b; font-size: 0.9rem; margin-bottom: 1rem; }
 .tabs {
   display: flex;
@@ -1059,8 +1274,11 @@ async function exportIndicadores() {
 .nodo.proyecto.clickable:hover { text-decoration: underline; }
 .nodo.indicador { color: #64748b; font-size: 0.9rem; cursor: default; }
 .nodo .label { color: #94a3b8; font-style: italic; }
-.nodo .valor { flex: 1; }
-.nodo .badge { background: #dbeafe; color: #2563eb; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.8rem; }
+.nodo .valor { flex: 1; min-width: 0; }
+.proyecto-nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proyecto-avance-badges { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.nodo .badge { background: #dbeafe; color: #2563eb; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; min-width: 2.75rem; text-align: center; flex-shrink: 0; }
+.nodo .badge-objetivos { background: #dcfce7; color: #15803d; min-width: auto; }
 .nodo .estado, .nodo .meta { font-size: 0.8rem; color: #64748b; }
 .nodo-acciones {
   display: flex;

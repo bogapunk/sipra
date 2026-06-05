@@ -57,9 +57,13 @@ function parseListResponse(payload: unknown): Record<string, unknown>[] {
   return []
 }
 
+function esUsuarioActivo(estado: unknown): boolean {
+  return estado === true || estado === 1 || estado === '1'
+}
+
 const load = async () => {
   const [u, r, a, s] = await Promise.allSettled([
-    api.get('usuarios/'),
+    api.get('usuarios/', { params: { incluir_inactivos: '1' } }),
     api.get('roles/'),
     api.get('areas/', { params: { estado: 'true' } }),
     api.get('secretarias/', { params: { activa: 'true' } }),
@@ -86,10 +90,11 @@ const usuariosFiltrados = computed(() => {
 
 const resumenUsuarios = computed(() => {
   const total = usuariosFiltrados.value.length
-  const activos = usuariosFiltrados.value.filter((u) => u.estado !== false).length
+  const activos = usuariosFiltrados.value.filter((u) => esUsuarioActivo(u.estado)).length
+  const inactivos = total - activos
   return [
-    { key: 'total', title: 'Usuarios visibles', value: total, meta: 'Resultado actual de la vista', tone: 'neutral' },
-    { key: 'activos', title: 'Activos', value: activos, meta: `${Math.max(0, total - activos)} inactivos`, tone: 'success' },
+    { key: 'total', title: 'Total usuarios', value: total, meta: 'Activos e inactivos', tone: 'neutral' },
+    { key: 'activos', title: 'Activos', value: activos, meta: `${inactivos} inactivo${inactivos === 1 ? '' : 's'}`, tone: 'success' },
   ]
 })
 
@@ -101,7 +106,7 @@ async function descargarExcel() {
     String(u.email || ''),
     String(u.rol_nombre || ''),
     String(u.area_nombre || u.secretaria_nombre || ''),
-    (u.estado !== false ? 'Activo' : 'Inactivo'),
+    (esUsuarioActivo(u.estado) ? 'Activo' : 'Inactivo'),
   ])
   await exportToCsv(headers, rows, `usuarios_${new Date().toISOString().slice(0, 10)}.csv`)
 }
@@ -157,7 +162,7 @@ const openEdit = async (u: Record<string, unknown>) => {
     rol: u.rol as number,
     area: areaVal,
     secretaria: secretariaVal,
-    estado: u.estado !== false,
+    estado: esUsuarioActivo(u.estado),
   }
   showForm.value = true
 }
@@ -334,14 +339,14 @@ onMounted(load)
         </tr>
       </thead>
       <tbody>
-        <tr v-for="u in usuariosFiltrados" :key="(u.id as number)">
+        <tr v-for="u in usuariosFiltrados" :key="(u.id as number)" :class="{ 'row-inactive': !esUsuarioActivo(u.estado) }">
           <td>{{ u.nombre_completo || u.nombre }}</td>
           <td>{{ u.email }}</td>
           <td>{{ u.rol_nombre || '-' }}</td>
           <td class="col-area-secretaria">{{ u.area_nombre || u.secretaria_nombre || '—' }}</td>
           <td>
-            <span class="status-chip" :class="u.estado ? 'status-active' : 'status-inactive'">
-              {{ u.estado ? 'Activo' : 'Inactivo' }}
+            <span class="status-chip" :class="esUsuarioActivo(u.estado) ? 'status-active' : 'status-inactive'">
+              {{ esUsuarioActivo(u.estado) ? 'Activo' : 'Inactivo' }}
             </span>
           </td>
           <td class="actions-cell col-acciones">
@@ -377,7 +382,7 @@ onMounted(load)
           </div>
           <div class="detalle-row app-detail-row">
             <span class="detalle-label app-detail-label">Estado</span>
-            <span class="detalle-valor app-detail-value">{{ usuarioVer.estado !== false ? 'Activo' : 'Inactivo' }}</span>
+            <span class="detalle-valor app-detail-value">{{ esUsuarioActivo(usuarioVer.estado) ? 'Activo' : 'Inactivo' }}</span>
           </div>
         </div>
         <div class="modal-actions">
@@ -536,6 +541,8 @@ onMounted(load)
 .msg-error { font-size: 0.8rem; color: #dc2626; margin: 0.25rem 0 0; }
 .msg-ok { font-size: 0.8rem; color: #16a34a; margin: 0.25rem 0 0; }
 .input-error { border-color: #dc2626 !important; }
+.row-inactive { background-color: #fef2f2; }
+.row-inactive:hover { background-color: #fee2e2; }
 @media (max-width: 700px) {
   .usuarios-summary { grid-template-columns: 1fr; }
 }
