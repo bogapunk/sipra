@@ -244,7 +244,8 @@ class ProyectosDashboardView(APIView):
             elif vencimiento == 'en-plazo':
                 proyectos = proyectos.exclude(estado='Finalizado').filter(fecha_fin_estimada__gt=limite)
         from projects.querysets import proyecto_dashboard_list_qs
-        proyectos = proyecto_dashboard_list_qs(proyectos)
+        # Orden: más recientes primero (por fecha de creación; id como desempate estable).
+        proyectos = proyecto_dashboard_list_qs(proyectos).order_by('-fecha_creacion', '-id')
         from projects.serializers import ProyectoDashboardSerializer
         cache_query = request.query_params.copy()
         cache_key_raw = f"{request.user.id}|{urlencode(sorted(cache_query.items()), doseq=True)}"

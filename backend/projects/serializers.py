@@ -120,6 +120,7 @@ class ProyectoSerializer(serializers.ModelSerializer):
     objetivos = ProyectoObjetivoInputSerializer(many=True, write_only=True, required=False)
     objetivos_asignados = serializers.SerializerMethodField()
     avance_objetivos = serializers.SerializerMethodField()
+    porcentaje_avance = serializers.SerializerMethodField()
     areas_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
     secretarias_ids = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
     areas_asignadas_ids = serializers.SerializerMethodField(read_only=True)
@@ -172,6 +173,18 @@ class ProyectoSerializer(serializers.ModelSerializer):
         return ProyectoObjetivo.calcular_avance_promedio(
             ProyectoObjetivo.objects.filter(proyecto=obj)
         )
+
+    def get_porcentaje_avance(self, obj):
+        """Avance del proyecto calculado en vivo desde las tareas.
+
+        Cada tarea pesa 100/N (N = total de tareas del proyecto); el avance es el
+        promedio de porcentaje_avance de las tareas, de modo que una tarea finalizada
+        (100%) aporta 100/N y la suma siempre queda entre 0 y 100. Se recalcula solo
+        al agregar/quitar tareas o al cambiar su estado, sin depender del valor guardado.
+        """
+        from tasks.models import Tarea
+        result = Tarea.objects.filter(proyecto=obj).aggregate(avg=Avg('porcentaje_avance'))
+        return round(float(result['avg'] or 0), 2)
 
     def _sync_objetivos(self, proyecto, objetivos_data):
         if objetivos_data is None:

@@ -77,6 +77,7 @@ function puedeModificarAdjunto(a: Record<string, unknown>): boolean {
 }
 
 const proyectoId = computed(() => Number(route.params.id))
+const proyectoIdValido = computed(() => Number.isInteger(proyectoId.value) && proyectoId.value > 0)
 
 function parseListResponse(payload: unknown): Record<string, unknown>[] {
   if (Array.isArray(payload)) return payload as Record<string, unknown>[]
@@ -105,6 +106,12 @@ function dependenciaTarea(t: Record<string, unknown>): string {
 
 const load = async () => {
   const id = proyectoId.value
+  if (!proyectoIdValido.value) {
+    proyecto.value = null
+    errorCarga.value = 'Proyecto no encontrado.'
+    carga.value = false
+    return
+  }
   carga.value = true
   errorCarga.value = ''
   const tClienteInicio = performance.now()
@@ -395,6 +402,7 @@ async function irAsignarTarea(tareaId: number) {
 }
 
 async function onTareasModalesUpdated() {
+  if (!proyectoIdValido.value) return
   try {
     const res = await getProyectoVistaDetalle(proyectoId.value, true)
     const data = res.data as Record<string, unknown>
@@ -486,6 +494,7 @@ async function exportarExcel() {
 }
 
 async function actualizarTareas() {
+  if (!proyectoIdValido.value) return
   try {
     const res = await getProyectoVistaDetalle(proyectoId.value, true)
     tareas.value = parseListResponse((res.data as Record<string, unknown>).tareas)
@@ -497,6 +506,7 @@ async function actualizarTareas() {
 }
 
 async function actualizarTareasSilencioso() {
+  if (!proyectoIdValido.value) return
   try {
     const res = await getProyectoVistaDetalle(proyectoId.value, true)
     tareas.value = parseListResponse((res.data as Record<string, unknown>).tareas)

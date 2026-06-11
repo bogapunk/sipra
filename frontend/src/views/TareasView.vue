@@ -690,13 +690,10 @@ const tareasParaTabla = computed(() => {
   const resultado: { tarea: Record<string, unknown>; esSubtarea: boolean }[] = []
   const idsIncluidos = new Set<number>()
   const hijosPorPadre = new Map<number, Record<string, unknown>[]>()
+  // Más recientes primero: el id autoincremental correlaciona con la fecha de creación,
+  // de modo que un id mayor equivale a una tarea creada más recientemente.
   const ordenar = (items: Record<string, unknown>[]) =>
-    [...items].sort((a, b) => {
-      const ordenA = Number(a.orden ?? 0)
-      const ordenB = Number(b.orden ?? 0)
-      if (ordenA !== ordenB) return ordenA - ordenB
-      return Number(a.id ?? 0) - Number(b.id ?? 0)
-    })
+    [...items].sort((a, b) => Number(b.id ?? 0) - Number(a.id ?? 0))
   for (const t of lista) {
     const raw = t.tarea_padre
     const padreId = raw == null
