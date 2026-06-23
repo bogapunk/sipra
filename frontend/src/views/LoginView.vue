@@ -98,6 +98,17 @@ const submit = async () => {
           <span class="btn-text">{{ loading ? 'Iniciando sesión...' : 'Iniciar sesión' }}</span>
         </button>
       </form>
+
+      <div class="login-support" role="contentinfo">
+        <span class="support-title">Soporte técnico</span>
+        <a
+          class="support-email"
+          href="mailto:sintegralp.soporte@tierradelfuego.gob.ar"
+          aria-label="Enviar correo a soporte técnico"
+        >
+          sintegralp.soporte@tierradelfuego.gob.ar
+        </a>
+      </div>
     </div>
     <AppFooter variant="login" />
   </div>
@@ -289,6 +300,39 @@ const submit = async () => {
 
 @keyframes login-spin {
   to { transform: rotate(360deg); }
+}
+
+/* Sección de soporte */
+.login-support {
+  margin-top: clamp(1.25rem, 3vw, 1.75rem);
+  padding-top: clamp(1rem, 2.5vw, 1.25rem);
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+}
+
+.support-title {
+  font-size: clamp(0.72rem, 1.9vw, 0.8rem);
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+
+.support-email {
+  font-size: clamp(0.78rem, 2vw, 0.88rem);
+  color: #1565c0;
+  text-decoration: none;
+  font-weight: 600;
+  word-break: break-word;
+  transition: color 0.2s;
+}
+
+.support-email:hover {
+  color: #0d47a1;
+  text-decoration: underline;
 }
 
 /* Responsive: móvil pequeño */

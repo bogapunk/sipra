@@ -15,6 +15,12 @@ withDefaults(defineProps<{
       <p class="footer-copyright">
         © 2026 - Todos los derechos reservados | Las Islas Malvinas son argentinas.
       </p>
+      <p class="footer-support">
+        Soporte:
+        <a class="footer-support-link" href="mailto:sintegralp.soporte@tierradelfuego.gob.ar">
+          sintegralp.soporte@tierradelfuego.gob.ar
+        </a>
+      </p>
     </div>
   </footer>
 </template>
@@ -47,13 +53,30 @@ withDefaults(defineProps<{
   font-weight: 400;
   line-height: 1.4;
 }
+.footer-support {
+  font-size: clamp(0.68rem, 1.9vw, 0.78rem);
+  margin: 0;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+.footer-support-link {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px solid currentColor;
+  transition: opacity 0.2s;
+}
+.footer-support-link:hover {
+  opacity: 0.8;
+}
 
 /* Variante para paneles (con fondo) */
 .footer-default {
   background: #f8fafc;
   border-top: 1px solid #e2e8f0;
 }
-.footer-default .footer-copyright {
+.footer-default .footer-copyright,
+.footer-default .footer-support {
   color: #64748b;
 }
 
@@ -69,6 +92,10 @@ withDefaults(defineProps<{
 .footer-login .footer-copyright {
   color: rgba(255, 255, 255, 0.85);
   font-size: clamp(0.65rem, 1.8vw, 0.75rem);
+}
+.footer-login .footer-support {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: clamp(0.63rem, 1.7vw, 0.72rem);
 }
 
 @media (max-width: 480px) {
